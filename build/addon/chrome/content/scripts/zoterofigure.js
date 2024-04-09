@@ -69,13 +69,14 @@
             doAction: async (uri) => {
               var _a;
               const Zotero2 = basic_1.BasicTool.getZotero();
+              const window2 = Zotero2.getMainWindow();
               const uriString = uri.spec.split("//").pop();
               if (!uriString) {
                 return;
               }
               const params = {};
               (_a = uriString.split("?").pop()) === null || _a === void 0 ? void 0 : _a.split("&").forEach((p) => {
-                params[p.split("=")[0]] = p.split("=")[1];
+                params[p.split("=")[0]] = decodeURIComponent(p.split("=")[1]);
               });
               const skipPasswordCheck = toolkitGlobal_1.default.getInstance().debugBridge.disableDebugBridgePassword;
               let allowed = false;
@@ -83,7 +84,7 @@
                 allowed = true;
               } else {
                 if (typeof params.password === "undefined" && typeof this.password === "undefined") {
-                  allowed = window.confirm(`External App ${params.app} wants to execute command without password.
+                  allowed = window2.confirm(`External App ${params.app} wants to execute command without password.
 Command:
 ${(params.run || params.file || "").slice(0, 100)}
 If you do not know what it is, please click Cancel to deny.`);
@@ -96,19 +97,22 @@ If you do not know what it is, please click Cancel to deny.`);
                   try {
                     const AsyncFunction = Object.getPrototypeOf(async function() {
                     }).constructor;
-                    const f = new AsyncFunction("Zotero,window", decodeURIComponent(params.run));
-                    await f(Zotero2, Zotero2.getMainWindow());
+                    const f = new AsyncFunction("Zotero,window", params.run);
+                    await f(Zotero2, window2);
                   } catch (e) {
                     Zotero2.debug(e);
-                    Zotero2.getMainWindow().console.log(e);
+                    window2.console.log(e);
                   }
                 }
                 if (params.file) {
                   try {
-                    Services.scriptloader.loadSubScript(decodeURIComponent(params.file), { Zotero: Zotero2, window: Zotero2.getMainWindow() });
+                    Services.scriptloader.loadSubScript(params.file, {
+                      Zotero: Zotero2,
+                      window: window2
+                    });
                   } catch (e) {
                     Zotero2.debug(e);
-                    Zotero2.getMainWindow().console.log(e);
+                    window2.console.log(e);
                   }
                 }
               }
@@ -121,8 +125,81 @@ If you do not know what it is, please click Cancel to deny.`);
         }
       };
       exports.DebugBridge = DebugBridge;
-      DebugBridge.version = 1;
+      DebugBridge.version = 2;
       DebugBridge.passwordPref = "extensions.zotero.debug-bridge.password";
+    }
+  });
+
+  // node_modules/zotero-plugin-toolkit/dist/utils/pluginBridge.js
+  var require_pluginBridge = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/utils/pluginBridge.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.PluginBridge = void 0;
+      var basic_1 = require_basic();
+      var PluginBridge = class {
+        get version() {
+          return PluginBridge.version;
+        }
+        constructor() {
+          this.initializePluginBridge();
+        }
+        static setModule(instance) {
+          var _a;
+          if (!((_a = instance.pluginBridge) === null || _a === void 0 ? void 0 : _a.version) || instance.pluginBridge.version < PluginBridge.version) {
+            instance.pluginBridge = new PluginBridge();
+          }
+        }
+        initializePluginBridge() {
+          const { AddonManager } = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
+          const Zotero2 = basic_1.BasicTool.getZotero();
+          const pluginBridgeExtension = {
+            noContent: true,
+            doAction: async (uri) => {
+              var _a;
+              try {
+                const uriString = uri.spec.split("//").pop();
+                if (!uriString) {
+                  return;
+                }
+                const params = {};
+                (_a = uriString.split("?").pop()) === null || _a === void 0 ? void 0 : _a.split("&").forEach((p) => {
+                  params[p.split("=")[0]] = decodeURIComponent(p.split("=")[1]);
+                });
+                if (params.action === "install" && params.url) {
+                  if (params.minVersion && Services.vc.compare(Zotero2.version, params.minVersion) < 0 || params.maxVersion && Services.vc.compare(Zotero2.version, params.maxVersion) > 0) {
+                    throw new Error(`Plugin is not compatible with Zotero version ${Zotero2.version}.The plugin requires Zotero version between ${params.minVersion} and ${params.maxVersion}.`);
+                  }
+                  const addon2 = await AddonManager.getInstallForURL(params.url);
+                  if (addon2 && addon2.state === AddonManager.STATE_AVAILABLE) {
+                    addon2.install();
+                    hint("Plugin installed successfully.", true);
+                  } else {
+                    throw new Error(`Plugin ${params.url} is not available.`);
+                  }
+                }
+              } catch (e) {
+                Zotero2.logError(e);
+                hint(e.message, false);
+              }
+            },
+            newChannel: function(uri) {
+              this.doAction(uri);
+            }
+          };
+          Services.io.getProtocolHandler("zotero").wrappedJSObject._extensions["zotero://plugin"] = pluginBridgeExtension;
+        }
+      };
+      exports.PluginBridge = PluginBridge;
+      PluginBridge.version = 1;
+      function hint(content, success) {
+        const progressWindow = new Zotero.ProgressWindow({ closeOnClick: true });
+        progressWindow.changeHeadline("Plugin Toolkit");
+        progressWindow.progress = new progressWindow.ItemProgress(success ? "chrome://zotero/skin/tick.png" : "chrome://zotero/skin/cross.png", content);
+        progressWindow.progress.setProgress(100);
+        progressWindow.show();
+        progressWindow.startCloseTimer(5e3);
+      }
     }
   });
 
@@ -134,6 +211,7 @@ If you do not know what it is, please click Cancel to deny.`);
       exports.ToolkitGlobal = void 0;
       var basic_1 = require_basic();
       var debugBridge_1 = require_debugBridge();
+      var pluginBridge_1 = require_pluginBridge();
       var ToolkitGlobal = class {
         constructor() {
           initializeModules(this);
@@ -191,6 +269,7 @@ If you do not know what it is, please click Cancel to deny.`);
           initializedHooks: {}
         });
         debugBridge_1.DebugBridge.setModule(instance);
+        pluginBridge_1.PluginBridge.setModule(instance);
       }
       function setModule(instance, key, module2) {
         var _a;
@@ -227,7 +306,7 @@ If you do not know what it is, please click Cancel to deny.`);
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.unregister = exports.ManagerTool = exports.BasicTool = void 0;
       var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var BasicTool3 = class {
+      var BasicTool2 = class {
         get basicOptions() {
           return this._basicOptions;
         }
@@ -262,6 +341,8 @@ If you do not know what it is, please click Cancel to deny.`);
                 return _Zotero;
               case "window":
                 return window2;
+              case "windows":
+                return _Zotero.getMainWindows();
               case "document":
                 return window2.document;
               case "ZoteroPane":
@@ -388,7 +469,7 @@ If you do not know what it is, please click Cancel to deny.`);
           if (!source) {
             return;
           }
-          if (source instanceof BasicTool3) {
+          if (source instanceof BasicTool2) {
             this._basicOptions = source._basicOptions;
           } else {
             this._basicOptions = source;
@@ -398,416 +479,29 @@ If you do not know what it is, please click Cancel to deny.`);
           return typeof Zotero !== "undefined" ? Zotero : Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject;
         }
       };
-      exports.BasicTool = BasicTool3;
-      var ManagerTool = class extends BasicTool3 {
+      exports.BasicTool = BasicTool2;
+      var ManagerTool = class extends BasicTool2 {
       };
       exports.ManagerTool = ManagerTool;
-      function unregister2(tools) {
+      function unregister(tools) {
         Object.values(tools).forEach((tool) => {
           if (tool instanceof ManagerTool || typeof tool.unregisterAll === "function") {
             tool.unregisterAll();
           }
         });
       }
-      exports.unregister = unregister2;
+      exports.unregister = unregister;
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/utils/debugBridge.js
-  var require_debugBridge2 = __commonJS({
-    "../zotero-plugin-toolkit/dist/utils/debugBridge.js"(exports) {
-      "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.DebugBridge = void 0;
-      var basic_1 = require_basic2();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
-      var DebugBridge = class {
-        get version() {
-          return DebugBridge.version;
-        }
-        get disableDebugBridgePassword() {
-          return this._disableDebugBridgePassword;
-        }
-        set disableDebugBridgePassword(value) {
-          this._disableDebugBridgePassword = value;
-        }
-        get password() {
-          return basic_1.BasicTool.getZotero().Prefs.get(DebugBridge.passwordPref, true);
-        }
-        set password(v) {
-          basic_1.BasicTool.getZotero().Prefs.set(DebugBridge.passwordPref, v, true);
-        }
-        constructor() {
-          this._disableDebugBridgePassword = false;
-          this.initializeDebugBridge();
-        }
-        static setModule(instance) {
-          var _a;
-          if (!((_a = instance.debugBridge) === null || _a === void 0 ? void 0 : _a.version) || instance.debugBridge.version < DebugBridge.version) {
-            instance.debugBridge = new DebugBridge();
-          }
-        }
-        initializeDebugBridge() {
-          const debugBridgeExtension = {
-            noContent: true,
-            doAction: async (uri) => {
-              var _a;
-              const Zotero2 = basic_1.BasicTool.getZotero();
-              const uriString = uri.spec.split("//").pop();
-              if (!uriString) {
-                return;
-              }
-              const params = {};
-              (_a = uriString.split("?").pop()) === null || _a === void 0 ? void 0 : _a.split("&").forEach((p) => {
-                params[p.split("=")[0]] = p.split("=")[1];
-              });
-              const skipPasswordCheck = toolkitGlobal_1.default.getInstance().debugBridge.disableDebugBridgePassword;
-              let allowed = false;
-              if (skipPasswordCheck) {
-                allowed = true;
-              } else {
-                if (typeof params.password === "undefined" && typeof this.password === "undefined") {
-                  allowed = window.confirm(`External App ${params.app} wants to execute command without password.
-Command:
-${(params.run || params.file || "").slice(0, 100)}
-If you do not know what it is, please click Cancel to deny.`);
-                } else {
-                  allowed = this.password === params.password;
-                }
-              }
-              if (allowed) {
-                if (params.run) {
-                  try {
-                    const AsyncFunction = Object.getPrototypeOf(async function() {
-                    }).constructor;
-                    const f = new AsyncFunction("Zotero,window", decodeURIComponent(params.run));
-                    await f(Zotero2, Zotero2.getMainWindow());
-                  } catch (e) {
-                    Zotero2.debug(e);
-                    Zotero2.getMainWindow().console.log(e);
-                  }
-                }
-                if (params.file) {
-                  try {
-                    Services.scriptloader.loadSubScript(decodeURIComponent(params.file), { Zotero: Zotero2, window: Zotero2.getMainWindow() });
-                  } catch (e) {
-                    Zotero2.debug(e);
-                    Zotero2.getMainWindow().console.log(e);
-                  }
-                }
-              }
-            },
-            newChannel: function(uri) {
-              this.doAction(uri);
-            }
-          };
-          Services.io.getProtocolHandler("zotero").wrappedJSObject._extensions["zotero://ztoolkit-debug"] = debugBridgeExtension;
-        }
-      };
-      exports.DebugBridge = DebugBridge;
-      DebugBridge.version = 1;
-      DebugBridge.passwordPref = "extensions.zotero.debug-bridge.password";
-    }
-  });
-
-  // ../zotero-plugin-toolkit/dist/managers/toolkitGlobal.js
-  var require_toolkitGlobal2 = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/toolkitGlobal.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.ToolkitGlobal = void 0;
-      var basic_1 = require_basic2();
-      var debugBridge_1 = require_debugBridge2();
-      var ToolkitGlobal = class {
-        constructor() {
-          initializeModules(this);
-          this.currentWindow = basic_1.BasicTool.getZotero().getMainWindow();
-        }
-        /**
-         * Get the global unique instance of `class ToolkitGlobal`.
-         * @returns An instance of `ToolkitGlobal`.
-         */
-        static getInstance() {
-          const Zotero2 = basic_1.BasicTool.getZotero();
-          let requireInit = false;
-          if (!("_toolkitGlobal" in Zotero2)) {
-            Zotero2._toolkitGlobal = new ToolkitGlobal();
-            requireInit = true;
-          }
-          const currentGlobal = Zotero2._toolkitGlobal;
-          if (currentGlobal.currentWindow !== Zotero2.getMainWindow()) {
-            checkWindowDependentModules(currentGlobal);
-            requireInit = true;
-          }
-          if (requireInit) {
-            initializeModules(currentGlobal);
-          }
-          return currentGlobal;
-        }
-      };
-      exports.ToolkitGlobal = ToolkitGlobal;
-      function initializeModules(instance) {
-        setModule(instance, "fieldHooks", {
-          _ready: false,
-          getFieldHooks: {},
-          setFieldHooks: {},
-          isFieldOfBaseHooks: {}
-        });
-        setModule(instance, "itemTree", {
-          _ready: false,
-          columns: [],
-          renderCellHooks: {}
-        });
-        setModule(instance, "itemBox", {
-          _ready: false,
-          fieldOptions: {}
-        });
-        setModule(instance, "shortcut", {
-          _ready: false,
-          eventKeys: []
-        });
-        setModule(instance, "prompt", {
-          _ready: false,
-          instance: void 0
-        });
-        setModule(instance, "readerInstance", {
-          _ready: false,
-          initializedHooks: {}
-        });
-        debugBridge_1.DebugBridge.setModule(instance);
-      }
-      function setModule(instance, key, module2) {
-        var _a;
-        var _b;
-        if (!module2) {
-          return;
-        }
-        if (!instance[key]) {
-          instance[key] = module2;
-        }
-        for (const moduleKey in module2) {
-          (_a = (_b = instance[key])[moduleKey]) !== null && _a !== void 0 ? _a : _b[moduleKey] = module2[moduleKey];
-        }
-      }
-      function checkWindowDependentModules(instance) {
-        instance.currentWindow = basic_1.BasicTool.getZotero().getMainWindow();
-        instance.itemTree = void 0;
-        instance.itemBox = void 0;
-        instance.shortcut = void 0;
-        instance.prompt = void 0;
-        instance.readerInstance = void 0;
-      }
-      exports.default = ToolkitGlobal;
-    }
-  });
-
-  // ../zotero-plugin-toolkit/dist/basic.js
-  var require_basic2 = __commonJS({
-    "../zotero-plugin-toolkit/dist/basic.js"(exports) {
-      "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.unregister = exports.ManagerTool = exports.BasicTool = void 0;
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
-      var BasicTool3 = class {
-        get basicOptions() {
-          return this._basicOptions;
-        }
-        /**
-         *
-         * @param basicTool Pass an BasicTool instance to copy its options.
-         */
-        constructor(data) {
-          this.patchSign = "zotero-plugin-toolkit@2.0.0";
-          this._basicOptions = {
-            log: {
-              _type: "toolkitlog",
-              disableConsole: false,
-              disableZLog: false,
-              prefix: ""
-            },
-            debug: toolkitGlobal_1.default.getInstance().debugBridge,
-            api: {
-              pluginID: "zotero-plugin-toolkit@windingwind.com"
-            }
-          };
-          this.updateOptions(data);
-          return;
-        }
-        getGlobal(k) {
-          const _Zotero = typeof Zotero !== "undefined" ? Zotero : Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject;
-          try {
-            const window2 = _Zotero.getMainWindow();
-            switch (k) {
-              case "Zotero":
-              case "zotero":
-                return _Zotero;
-              case "window":
-                return window2;
-              case "document":
-                return window2.document;
-              case "ZoteroPane":
-              case "ZoteroPane_Local":
-                return _Zotero.getActiveZoteroPane();
-              default:
-                return window2[k];
-            }
-          } catch (e) {
-            Zotero.logError(e);
-          }
-        }
-        /**
-         * Check if it's running on Zotero 7 (Firefox 102)
-         */
-        isZotero7() {
-          return Zotero.platformMajorVersion >= 102;
-        }
-        /**
-         * Get DOMParser.
-         *
-         * For Zotero 6: mainWindow.DOMParser or nsIDOMParser
-         *
-         * For Zotero 7: Firefox 102 support DOMParser natively
-         */
-        getDOMParser() {
-          if (this.isZotero7()) {
-            return new (this.getGlobal("DOMParser"))();
-          }
-          try {
-            return new (this.getGlobal("DOMParser"))();
-          } catch (e) {
-            return Components.classes["@mozilla.org/xmlextras/domparser;1"].createInstance(Components.interfaces.nsIDOMParser);
-          }
-        }
-        /**
-         * If it's an XUL element
-         * @param elem
-         */
-        isXULElement(elem) {
-          return elem.namespaceURI === "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-        }
-        /**
-         * Create an XUL element
-         *
-         * For Zotero 6, use `createElementNS`;
-         *
-         * For Zotero 7+, use `createXULElement`.
-         * @param doc
-         * @param type
-         * @example
-         * Create a `<menuitem>`:
-         * ```ts
-         * const compat = new ZoteroCompat();
-         * const doc = compat.getWindow().document;
-         * const elem = compat.createXULElement(doc, "menuitem");
-         * ```
-         */
-        createXULElement(doc, type) {
-          if (this.isZotero7()) {
-            return doc.createXULElement(type);
-          } else {
-            return doc.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", type);
-          }
-        }
-        /**
-         * Output to both Zotero.debug and console.log
-         * @param data e.g. string, number, object, ...
-         */
-        log(...data) {
-          var _a;
-          if (data.length === 0) {
-            return;
-          }
-          const Zotero2 = this.getGlobal("Zotero");
-          const console = this.getGlobal("console");
-          let options;
-          if (((_a = data[data.length - 1]) === null || _a === void 0 ? void 0 : _a._type) === "toolkitlog") {
-            options = data.pop();
-          } else {
-            options = this._basicOptions.log;
-          }
-          try {
-            if (options.prefix) {
-              data.splice(0, 0, options.prefix);
-            }
-            if (!options.disableConsole) {
-              console.groupCollapsed(...data);
-              console.trace();
-              console.groupEnd();
-            }
-            if (!options.disableZLog) {
-              Zotero2.debug(data.map((d) => {
-                try {
-                  return typeof d === "object" ? JSON.stringify(d) : String(d);
-                } catch (e) {
-                  Zotero2.debug(d);
-                  return "";
-                }
-              }).join("\n"));
-            }
-          } catch (e) {
-            console.error(e);
-            Zotero2.logError(e);
-          }
-        }
-        /**
-         * Patch a function
-         * @deprecated Use `PatchManager` instead.
-         * @param object The owner of the function
-         * @param funcSign The signature of the function(function name)
-         * @param ownerSign The signature of patch owner to avoid patching again
-         * @param patcher The new wrapper of the patched function
-         */
-        patch(object, funcSign, ownerSign, patcher) {
-          if (object[funcSign][ownerSign]) {
-            throw new Error(`${String(funcSign)} re-patched`);
-          }
-          this.log("patching", funcSign, `by ${ownerSign}`);
-          object[funcSign] = patcher(object[funcSign]);
-          object[funcSign][ownerSign] = true;
-        }
-        updateOptions(source) {
-          if (!source) {
-            return;
-          }
-          if (source instanceof BasicTool3) {
-            this._basicOptions = source._basicOptions;
-          } else {
-            this._basicOptions = source;
-          }
-        }
-        static getZotero() {
-          return typeof Zotero !== "undefined" ? Zotero : Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject;
-        }
-      };
-      exports.BasicTool = BasicTool3;
-      var ManagerTool = class extends BasicTool3 {
-      };
-      exports.ManagerTool = ManagerTool;
-      function unregister2(tools) {
-        Object.values(tools).forEach((tool) => {
-          if (tool instanceof ManagerTool || typeof tool.unregisterAll === "function") {
-            tool.unregisterAll();
-          }
-        });
-      }
-      exports.unregister = unregister2;
-    }
-  });
-
-  // ../zotero-plugin-toolkit/dist/tools/ui.js
+  // node_modules/zotero-plugin-toolkit/dist/tools/ui.js
   var require_ui = __commonJS({
-    "../zotero-plugin-toolkit/dist/tools/ui.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/tools/ui.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.UITool = void 0;
-      var basic_1 = require_basic2();
-      var UITool2 = class extends basic_1.BasicTool {
+      var basic_1 = require_basic();
+      var UITool = class extends basic_1.BasicTool {
         get basicOptions() {
           return this._basicOptions;
         }
@@ -1014,7 +708,7 @@ If you do not know what it is, please click Cancel to deny.`);
           return range.extractContents();
         }
       };
-      exports.UITool = UITool2;
+      exports.UITool = UITool;
       var HTMLElementTagNames = [
         "a",
         "abbr",
@@ -1309,13 +1003,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/utils/wait.js
+  // node_modules/zotero-plugin-toolkit/dist/utils/wait.js
   var require_wait = __commonJS({
-    "../zotero-plugin-toolkit/dist/utils/wait.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/utils/wait.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.waitUtilAsync = exports.waitUntil = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var basicTool2 = new basic_1.BasicTool();
       function waitUntil(condition, callback, interval = 100, timeout = 1e4) {
         const start = Date.now();
@@ -1347,13 +1041,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/tools/reader.js
+  // node_modules/zotero-plugin-toolkit/dist/tools/reader.js
   var require_reader = __commonJS({
-    "../zotero-plugin-toolkit/dist/tools/reader.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/tools/reader.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ReaderTool = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var wait_1 = require_wait();
       var ReaderTool = class extends basic_1.BasicTool {
         /**
@@ -1471,13 +1165,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/tools/extraField.js
+  // node_modules/zotero-plugin-toolkit/dist/tools/extraField.js
   var require_extraField = __commonJS({
-    "../zotero-plugin-toolkit/dist/tools/extraField.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/tools/extraField.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ExtraFieldTool = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var ExtraFieldTool = class extends basic_1.BasicTool {
         /**
          * Get all extra fields
@@ -1536,7 +1230,11 @@ If you do not know what it is, please click Cancel to deny.`);
          */
         async setExtraField(item, key, value) {
           const fields = this.getExtraFields(item);
-          fields.set(key, value);
+          if (value === "" || typeof value === "undefined") {
+            fields.delete(key);
+          } else {
+            fields.set(key, value);
+          }
           await this.replaceExtraFields(item, fields);
         }
       };
@@ -1544,13 +1242,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/patch.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/patch.js
   var require_patch = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/patch.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/patch.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.PatcherManager = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var PatcherManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -1602,18 +1300,18 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/fieldHook.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js
   var require_fieldHook = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/fieldHook.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js"(exports) {
       "use strict";
       var __importDefault = exports && exports.__importDefault || function(mod) {
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.FieldHookManager = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var patch_1 = require_patch();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
+      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var FieldHookManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -1716,18 +1414,18 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/itemTree.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/itemTree.js
   var require_itemTree = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/itemTree.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/itemTree.js"(exports) {
       "use strict";
       var __importDefault = exports && exports.__importDefault || function(mod) {
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ItemTreeManager = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var fieldHook_1 = require_fieldHook();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
+      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var patch_1 = require_patch();
       var ItemTreeManager = class extends basic_1.ManagerTool {
         /**
@@ -1752,7 +1450,11 @@ If you do not know what it is, please click Cancel to deny.`);
           this.fieldHooks = new fieldHook_1.FieldHookManager(base);
           this.patcherManager = new patch_1.PatcherManager(base);
           this.initializationLock = this.getGlobal("Zotero").Promise.defer();
-          this.initializeGlobal();
+          if (!this.backend) {
+            this.initializeGlobal();
+          } else {
+            this.initializationLock.resolve();
+          }
         }
         unregisterAll() {
           [...this.localColumnCache].forEach((key) => this.unregister(key, { skipGetField: true }));
@@ -1824,17 +1526,14 @@ If you do not know what it is, please click Cancel to deny.`);
             showInColumnPicker: typeof options.ignoreInColumnPicker === "undefined" ? true : options.showInColumnPicker,
             submenu: options.submenu,
             columnPickerSubMenu: options.columnPickerSubMenu || options.submenu,
-            dataProvider: options.dataProvider || ((item, _dataKey) => item.getField(key))
+            dataProvider: options.dataProvider || ((item, _dataKey) => item.getField(key)),
+            renderCell: options.renderCell || options.renderCellHook
           };
           if (getFieldHook) {
             this.fieldHooks.register("getField", key, getFieldHook);
           }
           if (this.backend) {
-            const registeredKey = await this.backend.registerColumns(column);
-            if (options.renderCellHook) {
-              await this.addRenderCellHook(registeredKey, options.renderCellHook);
-              await this.refresh();
-            }
+            return await this.backend.registerColumns(column);
           } else {
             this.globalCache.columns.push(column);
             this.localColumnCache.push(column.dataKey);
@@ -1880,6 +1579,7 @@ If you do not know what it is, please click Cancel to deny.`);
         }
         /**
          * Add a patch hook for `_renderCell`, which is called when cell is rendered.
+         * @deprecated
          *
          * This also works for Zotero's built-in cells.
          * @remarks
@@ -1897,6 +1597,7 @@ If you do not know what it is, please click Cancel to deny.`);
         }
         /**
          * Remove a patch hook by `dataKey`.
+         * @deprecated
          */
         async removeRenderCellHook(dataKey) {
           delete this.globalCache.renderCellHooks[dataKey];
@@ -1913,7 +1614,8 @@ If you do not know what it is, please click Cancel to deny.`);
           const Zotero2 = this.getGlobal("Zotero");
           await Zotero2.uiReadyPromise;
           const window2 = this.getGlobal("window");
-          const globalCache = this.globalCache = toolkitGlobal_1.default.getInstance().itemTree;
+          this.globalCache = toolkitGlobal_1.default.getInstance().itemTree;
+          const globalCache = this.globalCache;
           if (!globalCache._ready) {
             globalCache._ready = true;
             const itemTree = window2.require("zotero/itemTree");
@@ -1983,19 +1685,19 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/prompt.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/prompt.js
   var require_prompt = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/prompt.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/prompt.js"(exports) {
       "use strict";
       var __importDefault = exports && exports.__importDefault || function(mod) {
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.PromptManager = exports.Prompt = void 0;
-      var basic_1 = require_basic2();
-      var basic_2 = require_basic2();
+      var basic_1 = require_basic();
+      var basic_2 = require_basic();
       var ui_1 = require_ui();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
+      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var Prompt = class {
         get document() {
           return this.base.getGlobal("document");
@@ -2687,7 +2389,6 @@ If you do not know what it is, please click Cancel to deny.`);
          * ```
          */
         register(commands) {
-          window.console.log(JSON.parse(JSON.stringify(commands)));
           commands.forEach((c) => {
             var _a;
             return (_a = c.id) !== null && _a !== void 0 ? _a : c.id = c.name;
@@ -2695,7 +2396,6 @@ If you do not know what it is, please click Cancel to deny.`);
           this.prompt.commands = [...this.prompt.commands, ...commands];
           this.commands = [...this.commands, ...commands];
           this.prompt.showCommands(this.commands, true);
-          window.console.log(JSON.parse(JSON.stringify(Zotero._toolkitGlobal.prompt.instance.commands)));
         }
         /**
          * You can delete a command registed before by its name.
@@ -2726,14 +2426,14 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/libraryTabPanel.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/libraryTabPanel.js
   var require_libraryTabPanel = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/libraryTabPanel.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/libraryTabPanel.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.LibraryTabPanelManager = void 0;
       var ui_1 = require_ui();
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var LibraryTabPanelManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -2887,15 +2587,15 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/readerTabPanel.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/readerTabPanel.js
   var require_readerTabPanel = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/readerTabPanel.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/readerTabPanel.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ReaderTabPanelManager = void 0;
       var ui_1 = require_ui();
       var reader_1 = require_reader();
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var ReaderTabPanelManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -3185,14 +2885,14 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/menu.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/menu.js
   var require_menu = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/menu.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/menu.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.MenuManager = void 0;
       var ui_1 = require_ui();
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var MenuManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -3291,10 +2991,12 @@ If you do not know what it is, please click Cancel to deny.`);
               children: []
             };
             if (menuitemOption.icon) {
-              if (menuitemOption.tag === "menu") {
-                elementOption.attributes["class"] += " menu-iconic";
-              } else {
-                elementOption.attributes["class"] += " menuitem-iconic";
+              if (!this.getGlobal("Zotero").isMac) {
+                if (menuitemOption.tag === "menu") {
+                  elementOption.attributes["class"] += " menu-iconic";
+                } else {
+                  elementOption.attributes["class"] += " menuitem-iconic";
+                }
               }
               elementOption.styles["list-style-image"] = `url(${menuitemOption.icon})`;
             }
@@ -3354,15 +3056,15 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/preferencePane.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/preferencePane.js
   var require_preferencePane = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/preferencePane.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/preferencePane.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.PreferencePaneManager = void 0;
       var ui_1 = require_ui();
-      var basic_1 = require_basic2();
-      var PreferencePaneManager2 = class extends basic_1.ManagerTool {
+      var basic_1 = require_basic();
+      var PreferencePaneManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
           this.alive = true;
@@ -3575,23 +3277,23 @@ If you do not know what it is, please click Cancel to deny.`);
           }
         }
       };
-      exports.PreferencePaneManager = PreferencePaneManager2;
+      exports.PreferencePaneManager = PreferencePaneManager;
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/shortcut.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/shortcut.js
   var require_shortcut = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/shortcut.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/shortcut.js"(exports) {
       "use strict";
       var __importDefault = exports && exports.__importDefault || function(mod) {
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ShortcutManager = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var ui_1 = require_ui();
-      var basic_2 = require_basic2();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
+      var basic_2 = require_basic();
+      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var ShortcutManager = class extends basic_2.ManagerTool {
         constructor(base) {
           super(base);
@@ -4370,13 +4072,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/helpers/clipboard.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/clipboard.js
   var require_clipboard = __commonJS({
-    "../zotero-plugin-toolkit/dist/helpers/clipboard.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/helpers/clipboard.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ClipboardHelper = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var ClipboardHelper = class {
         constructor() {
           this.transferable = Components.classes["@mozilla.org/widget/transferable;1"].createInstance(Components.interfaces.nsITransferable);
@@ -4427,13 +4129,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/helpers/filePicker.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/filePicker.js
   var require_filePicker = __commonJS({
-    "../zotero-plugin-toolkit/dist/helpers/filePicker.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/helpers/filePicker.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.FilePickerHelper = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var FilePickerHelper = class {
         constructor(title, mode, filters, suggestion, window2, filterMask) {
           this.title = title;
@@ -4507,13 +4209,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/helpers/progressWindow.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/progressWindow.js
   var require_progressWindow = __commonJS({
-    "../zotero-plugin-toolkit/dist/helpers/progressWindow.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/helpers/progressWindow.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ProgressWindowHelper = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var ProgressWindowHelper = class extends Zotero.ProgressWindow {
         /**
          *
@@ -4591,13 +4293,13 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/helpers/virtualizedTable.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/virtualizedTable.js
   var require_virtualizedTable = __commonJS({
-    "../zotero-plugin-toolkit/dist/helpers/virtualizedTable.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/helpers/virtualizedTable.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.VirtualizedTableHelper = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var VirtualizedTableHelper = class {
         constructor(win) {
           this.window = win;
@@ -4679,9 +4381,9 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/helpers/dialog.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/dialog.js
   var require_dialog = __commonJS({
-    "../zotero-plugin-toolkit/dist/helpers/dialog.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/helpers/dialog.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.DialogHelper = void 0;
@@ -5086,17 +4788,17 @@ body {
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/readerInstance.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/readerInstance.js
   var require_readerInstance = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/readerInstance.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/readerInstance.js"(exports) {
       "use strict";
       var __importDefault = exports && exports.__importDefault || function(mod) {
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ReaderInstanceManager = void 0;
-      var basic_1 = require_basic2();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
+      var basic_1 = require_basic();
+      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var ReaderInstanceManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -5166,19 +4868,19 @@ body {
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/managers/itemBox.js
+  // node_modules/zotero-plugin-toolkit/dist/managers/itemBox.js
   var require_itemBox = __commonJS({
-    "../zotero-plugin-toolkit/dist/managers/itemBox.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/managers/itemBox.js"(exports) {
       "use strict";
       var __importDefault = exports && exports.__importDefault || function(mod) {
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ItemBoxManager = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var fieldHook_1 = require_fieldHook();
       var patch_1 = require_patch();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal2());
+      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var ItemBoxManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
@@ -5272,7 +4974,8 @@ body {
           const Zotero2 = this.getGlobal("Zotero");
           await Zotero2.uiReadyPromise;
           const window2 = this.getGlobal("window");
-          const globalCache = this.globalCache = toolkitGlobal_1.default.getInstance().itemBox;
+          this.globalCache = toolkitGlobal_1.default.getInstance().itemBox;
+          const globalCache = this.globalCache;
           const inZotero7 = this.isZotero7();
           if (!globalCache._ready) {
             globalCache._ready = true;
@@ -5365,13 +5068,242 @@ body {
     }
   });
 
-  // ../zotero-plugin-toolkit/dist/index.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/largePref.js
+  var require_largePref = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/helpers/largePref.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.LargePrefHelper = void 0;
+      var LargePrefHelper = class {
+        /**
+         *
+         * @param keyPref The preference name for storing the keys of the data.
+         * @param valuePrefPrefix The preference name prefix for storing the values of the data.
+         * @param hooks Hooks for parsing the values of the data.
+         * - `afterGetValue`: A function that takes the value of the data as input and returns the parsed value.
+         * - `beforeSetValue`: A function that takes the key and value of the data as input and returns the parsed key and value.
+         * If `hooks` is `"default"`, no parsing will be done.
+         * If `hooks` is `"parser"`, the values will be parsed as JSON.
+         * If `hooks` is an object, the values will be parsed by the hooks.
+         */
+        constructor(keyPref, valuePrefPrefix, hooks = "default") {
+          this.keyPref = keyPref;
+          this.valuePrefPrefix = valuePrefPrefix;
+          if (hooks === "default") {
+            this.hooks = defaultHooks;
+          } else if (hooks === "parser") {
+            this.hooks = parserHooks;
+          } else {
+            this.hooks = Object.assign(Object.assign({}, defaultHooks), hooks);
+          }
+          this.innerObj = {};
+        }
+        /**
+         * Get the object that stores the data.
+         * @returns The object that stores the data.
+         */
+        asObject() {
+          return this.constructTempObj();
+        }
+        /**
+         * Get the Map that stores the data.
+         * @returns The Map that stores the data.
+         */
+        asMapLike() {
+          const mapLike = {
+            get: (key) => this.getValue(key),
+            set: (key, value) => {
+              this.setValue(key, value);
+              return mapLike;
+            },
+            has: (key) => this.hasKey(key),
+            delete: (key) => this.deleteKey(key),
+            clear: () => {
+              for (const key of this.getKeys()) {
+                this.deleteKey(key);
+              }
+            },
+            forEach: (callback) => {
+              return this.constructTempMap().forEach(callback);
+            },
+            get size() {
+              return this._this.getKeys().length;
+            },
+            entries: () => {
+              return this.constructTempMap().values();
+            },
+            keys: () => {
+              const keys = this.getKeys();
+              return keys[Symbol.iterator]();
+            },
+            values: () => {
+              return this.constructTempMap().values();
+            },
+            [Symbol.iterator]: () => {
+              return this.constructTempMap()[Symbol.iterator]();
+            },
+            [Symbol.toStringTag]: "MapLike",
+            _this: this
+          };
+          return mapLike;
+        }
+        /**
+         * Get the keys of the data.
+         * @returns The keys of the data.
+         */
+        getKeys() {
+          const rawKeys = Zotero.Prefs.get(this.keyPref, true);
+          const keys = rawKeys ? JSON.parse(rawKeys) : [];
+          for (const key of keys) {
+            const value = "placeholder";
+            this.innerObj[key] = value;
+          }
+          return keys;
+        }
+        /**
+         * Set the keys of the data.
+         * @param keys The keys of the data.
+         */
+        setKeys(keys) {
+          keys = [...new Set(keys.filter((key) => key))];
+          Zotero.Prefs.set(this.keyPref, JSON.stringify(keys), true);
+          for (const key of keys) {
+            const value = "placeholder";
+            this.innerObj[key] = value;
+          }
+        }
+        /**
+         * Get the value of a key.
+         * @param key The key of the data.
+         * @returns The value of the key.
+         */
+        getValue(key) {
+          const value = Zotero.Prefs.get(`${this.valuePrefPrefix}${key}`, true);
+          if (typeof value === "undefined") {
+            return;
+          }
+          let { value: newValue } = this.hooks.afterGetValue({ value });
+          this.innerObj[key] = newValue;
+          return newValue;
+        }
+        /**
+         * Set the value of a key.
+         * @param key The key of the data.
+         * @param value The value of the key.
+         */
+        setValue(key, value) {
+          let { key: newKey, value: newValue } = this.hooks.beforeSetValue({
+            key,
+            value
+          });
+          this.setKey(newKey);
+          Zotero.Prefs.set(`${this.valuePrefPrefix}${newKey}`, newValue, true);
+          this.innerObj[newKey] = newValue;
+        }
+        /**
+         * Check if a key exists.
+         * @param key The key of the data.
+         * @returns Whether the key exists.
+         */
+        hasKey(key) {
+          return this.getKeys().includes(key);
+        }
+        /**
+         * Add a key.
+         * @param key The key of the data.
+         */
+        setKey(key) {
+          const keys = this.getKeys();
+          if (!keys.includes(key)) {
+            keys.push(key);
+            this.setKeys(keys);
+          }
+        }
+        /**
+         * Delete a key.
+         * @param key The key of the data.
+         */
+        deleteKey(key) {
+          const keys = this.getKeys();
+          const index = keys.indexOf(key);
+          if (index > -1) {
+            keys.splice(index, 1);
+            delete this.innerObj[key];
+            this.setKeys(keys);
+          }
+          Zotero.Prefs.clear(`${this.valuePrefPrefix}${key}`, true);
+          return true;
+        }
+        constructTempObj() {
+          return new Proxy(this.innerObj, {
+            get: (target, prop, receiver) => {
+              this.getKeys();
+              if (typeof prop === "string" && prop in target) {
+                this.getValue(prop);
+              }
+              return Reflect.get(target, prop, receiver);
+            },
+            set: (target, p, newValue, receiver) => {
+              if (typeof p === "string") {
+                if (newValue === void 0) {
+                  this.deleteKey(p);
+                  return true;
+                }
+                this.setValue(p, newValue);
+                return true;
+              }
+              return Reflect.set(target, p, newValue, receiver);
+            },
+            has: (target, p) => {
+              this.getKeys();
+              return Reflect.has(target, p);
+            },
+            deleteProperty: (target, p) => {
+              if (typeof p === "string") {
+                this.deleteKey(p);
+                return true;
+              }
+              return Reflect.deleteProperty(target, p);
+            }
+          });
+        }
+        constructTempMap() {
+          const map = /* @__PURE__ */ new Map();
+          for (const key of this.getKeys()) {
+            map.set(key, this.getValue(key));
+          }
+          return map;
+        }
+      };
+      exports.LargePrefHelper = LargePrefHelper;
+      var defaultHooks = {
+        afterGetValue: ({ value }) => ({ value }),
+        beforeSetValue: ({ key, value }) => ({ key, value })
+      };
+      var parserHooks = {
+        afterGetValue: ({ value }) => {
+          try {
+            value = JSON.parse(value);
+          } catch (e) {
+            return { value };
+          }
+          return { value };
+        },
+        beforeSetValue: ({ key, value }) => {
+          value = JSON.stringify(value);
+          return { key, value };
+        }
+      };
+    }
+  });
+
+  // node_modules/zotero-plugin-toolkit/dist/index.js
   var require_dist = __commonJS({
-    "../zotero-plugin-toolkit/dist/index.js"(exports) {
+    "node_modules/zotero-plugin-toolkit/dist/index.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ZoteroToolkit = void 0;
-      var basic_1 = require_basic2();
+      var basic_1 = require_basic();
       var ui_1 = require_ui();
       var reader_1 = require_reader();
       var extraField_1 = require_extraField();
@@ -5390,6 +5322,7 @@ body {
       var readerInstance_1 = require_readerInstance();
       var fieldHook_1 = require_fieldHook();
       var itemBox_1 = require_itemBox();
+      var largePref_1 = require_largePref();
       var ZoteroToolkit2 = class extends basic_1.BasicTool {
         constructor() {
           super();
@@ -5411,6 +5344,7 @@ body {
           this.ProgressWindow = progressWindow_1.ProgressWindowHelper;
           this.VirtualizedTable = virtualizedTable_1.VirtualizedTableHelper;
           this.Dialog = dialog_1.DialogHelper;
+          this.LargePrefObject = largePref_1.LargePrefHelper;
         }
         /**
          * Unregister everything created by managers.
@@ -5424,742 +5358,8 @@ body {
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/tools/ui.js
-  var require_ui2 = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/tools/ui.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.UITool = void 0;
-      var basic_1 = require_basic();
-      var UITool2 = class extends basic_1.BasicTool {
-        get basicOptions() {
-          return this._basicOptions;
-        }
-        constructor(base) {
-          super(base);
-          this.elementCache = [];
-          if (!this._basicOptions.ui) {
-            this._basicOptions.ui = {
-              enableElementRecord: true,
-              enableElementJSONLog: false,
-              enableElementDOMLog: true
-            };
-          }
-        }
-        /**
-         * Remove all elements created by `createElement`.
-         *
-         * @remarks
-         * > What is this for?
-         *
-         * In bootstrap plugins, elements must be manually maintained and removed on exiting.
-         *
-         * This API does this for you.
-         */
-        unregisterAll() {
-          this.elementCache.forEach((e) => {
-            var _a;
-            try {
-              (_a = e === null || e === void 0 ? void 0 : e.deref()) === null || _a === void 0 ? void 0 : _a.remove();
-            } catch (e2) {
-              this.log(e2);
-            }
-          });
-        }
-        createElement(...args) {
-          var _a, _b, _c;
-          const doc = args[0];
-          const tagName = args[1].toLowerCase();
-          let props = args[2] || {};
-          if (!tagName) {
-            return;
-          }
-          if (typeof args[2] === "string") {
-            props = {
-              namespace: args[2],
-              enableElementRecord: args[3]
-            };
-          }
-          if (typeof props.enableElementJSONLog !== "undefined" && props.enableElementJSONLog || this.basicOptions.ui.enableElementJSONLog) {
-            this.log(props);
-          }
-          props.properties = props.properties || props.directAttributes;
-          props.children = props.children || props.subElementOptions;
-          let elem;
-          if (tagName === "fragment") {
-            const fragElem = doc.createDocumentFragment();
-            elem = fragElem;
-          } else {
-            let realElem = props.id && (props.checkExistenceParent ? props.checkExistenceParent : doc).querySelector(`#${props.id}`);
-            if (realElem && props.ignoreIfExists) {
-              return realElem;
-            }
-            if (realElem && props.removeIfExists) {
-              realElem.remove();
-              realElem = void 0;
-            }
-            if (props.customCheck && !props.customCheck(doc, props)) {
-              return void 0;
-            }
-            if (!realElem || !props.skipIfExists) {
-              let namespace = props.namespace;
-              if (!namespace) {
-                const mightHTML = HTMLElementTagNames.includes(tagName);
-                const mightXUL = XULElementTagNames.includes(tagName);
-                const mightSVG = SVGElementTagNames.includes(tagName);
-                if (Number(mightHTML) + Number(mightXUL) + Number(mightSVG) > 1) {
-                  this.log(`[Warning] Creating element ${tagName} with no namespace specified. Found multiply namespace matches.`);
-                }
-                if (mightHTML) {
-                  namespace = "html";
-                } else if (mightXUL) {
-                  namespace = "xul";
-                } else if (mightSVG) {
-                  namespace = "svg";
-                } else {
-                  namespace = "html";
-                }
-              }
-              if (namespace === "xul") {
-                realElem = this.createXULElement(doc, tagName);
-              } else {
-                realElem = doc.createElementNS({
-                  html: "http://www.w3.org/1999/xhtml",
-                  svg: "http://www.w3.org/2000/svg"
-                }[namespace], tagName);
-              }
-              this.elementCache.push(new WeakRef(realElem));
-            }
-            if (props.id) {
-              realElem.id = props.id;
-            }
-            if (props.styles && Object.keys(props.styles).length) {
-              Object.keys(props.styles).forEach((k) => {
-                const v = props.styles[k];
-                typeof v !== "undefined" && (realElem.style[k] = v);
-              });
-            }
-            if (props.properties && Object.keys(props.properties).length) {
-              Object.keys(props.properties).forEach((k) => {
-                const v = props.properties[k];
-                typeof v !== "undefined" && (realElem[k] = v);
-              });
-            }
-            if (props.attributes && Object.keys(props.attributes).length) {
-              Object.keys(props.attributes).forEach((k) => {
-                const v = props.attributes[k];
-                typeof v !== "undefined" && realElem.setAttribute(k, String(v));
-              });
-            }
-            if ((_a = props.classList) === null || _a === void 0 ? void 0 : _a.length) {
-              realElem.classList.add(...props.classList);
-            }
-            if ((_b = props.listeners) === null || _b === void 0 ? void 0 : _b.length) {
-              props.listeners.forEach(({ type, listener, options }) => {
-                listener && realElem.addEventListener(type, listener, options);
-              });
-            }
-            elem = realElem;
-          }
-          if ((_c = props.children) === null || _c === void 0 ? void 0 : _c.length) {
-            const subElements = props.children.map((childProps) => {
-              childProps.namespace = childProps.namespace || props.namespace;
-              return this.createElement(doc, childProps.tag, childProps);
-            }).filter((e) => e);
-            elem.append(...subElements);
-          }
-          if (typeof props.enableElementDOMLog !== "undefined" && props.enableElementDOMLog || this.basicOptions.ui.enableElementDOMLog) {
-            this.log(elem);
-          }
-          return elem;
-        }
-        /**
-         * Append element(s) to a node.
-         * @param properties See {@link ElementProps}
-         * @param container The parent node to append to.
-         * @returns A Node that is the appended child (aChild),
-         *          except when aChild is a DocumentFragment,
-         *          in which case the empty DocumentFragment is returned.
-         */
-        appendElement(properties, container) {
-          return container.appendChild(this.createElement(container.ownerDocument, properties.tag, properties));
-        }
-        /**
-         * Inserts a node before a reference node as a child of its parent node.
-         * @param properties See {@link ElementProps}
-         * @param referenceNode The node before which newNode is inserted.
-         * @returns
-         */
-        insertElementBefore(properties, referenceNode) {
-          if (referenceNode.parentNode)
-            return referenceNode.parentNode.insertBefore(this.createElement(referenceNode.ownerDocument, properties.tag, properties), referenceNode);
-          else
-            this.log(referenceNode.tagName + " has no parent, cannot insert " + properties.tag);
-        }
-        /**
-         * Replace oldNode with a new one.
-         * @param properties See {@link ElementProps}
-         * @param oldNode The child to be replaced.
-         * @returns The replaced Node. This is the same node as oldChild.
-         */
-        replaceElement(properties, oldNode) {
-          if (oldNode.parentNode)
-            return oldNode.parentNode.replaceChild(this.createElement(oldNode.ownerDocument, properties.tag, properties), oldNode);
-          else
-            this.log(oldNode.tagName + " has no parent, cannot replace it with " + properties.tag);
-        }
-        /**
-         * Parse XHTML to XUL fragment. For Zotero 6.
-         *
-         * To load preferences from a Zotero 7's `.xhtml`, use this method to parse it.
-         * @param str xhtml raw text
-         * @param entities dtd file list ("chrome://xxx.dtd")
-         * @param defaultXUL true for default XUL namespace
-         */
-        parseXHTMLToFragment(str, entities = [], defaultXUL = true) {
-          let parser = this.getDOMParser();
-          const xulns = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-          const htmlns = "http://www.w3.org/1999/xhtml";
-          const wrappedStr = `${entities.length ? `<!DOCTYPE bindings [ ${entities.reduce((preamble, url, index) => {
-            return preamble + `<!ENTITY % _dtd-${index} SYSTEM "${url}"> %_dtd-${index}; `;
-          }, "")}]>` : ""}
-      <html:div xmlns="${defaultXUL ? xulns : htmlns}"
-          xmlns:xul="${xulns}" xmlns:html="${htmlns}">
-      ${str}
-      </html:div>`;
-          this.log(wrappedStr, parser);
-          let doc = parser.parseFromString(wrappedStr, "text/xml");
-          this.log(doc);
-          if (doc.documentElement.localName === "parsererror") {
-            throw new Error("not well-formed XHTML");
-          }
-          let range = doc.createRange();
-          range.selectNodeContents(doc.querySelector("div"));
-          return range.extractContents();
-        }
-      };
-      exports.UITool = UITool2;
-      var HTMLElementTagNames = [
-        "a",
-        "abbr",
-        "address",
-        "area",
-        "article",
-        "aside",
-        "audio",
-        "b",
-        "base",
-        "bdi",
-        "bdo",
-        "blockquote",
-        "body",
-        "br",
-        "button",
-        "canvas",
-        "caption",
-        "cite",
-        "code",
-        "col",
-        "colgroup",
-        "data",
-        "datalist",
-        "dd",
-        "del",
-        "details",
-        "dfn",
-        "dialog",
-        "div",
-        "dl",
-        "dt",
-        "em",
-        "embed",
-        "fieldset",
-        "figcaption",
-        "figure",
-        "footer",
-        "form",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "head",
-        "header",
-        "hgroup",
-        "hr",
-        "html",
-        "i",
-        "iframe",
-        "img",
-        "input",
-        "ins",
-        "kbd",
-        "label",
-        "legend",
-        "li",
-        "link",
-        "main",
-        "map",
-        "mark",
-        "menu",
-        "meta",
-        "meter",
-        "nav",
-        "noscript",
-        "object",
-        "ol",
-        "optgroup",
-        "option",
-        "output",
-        "p",
-        "picture",
-        "pre",
-        "progress",
-        "q",
-        "rp",
-        "rt",
-        "ruby",
-        "s",
-        "samp",
-        "script",
-        "section",
-        "select",
-        "slot",
-        "small",
-        "source",
-        "span",
-        "strong",
-        "style",
-        "sub",
-        "summary",
-        "sup",
-        "table",
-        "tbody",
-        "td",
-        "template",
-        "textarea",
-        "tfoot",
-        "th",
-        "thead",
-        "time",
-        "title",
-        "tr",
-        "track",
-        "u",
-        "ul",
-        "var",
-        "video",
-        "wbr"
-      ];
-      var XULElementTagNames = [
-        "action",
-        "arrowscrollbox",
-        "bbox",
-        "binding",
-        "bindings",
-        "box",
-        "broadcaster",
-        "broadcasterset",
-        "button",
-        "browser",
-        "checkbox",
-        "caption",
-        "colorpicker",
-        "column",
-        "columns",
-        "commandset",
-        "command",
-        "conditions",
-        "content",
-        "deck",
-        "description",
-        "dialog",
-        "dialogheader",
-        "editor",
-        "grid",
-        "grippy",
-        "groupbox",
-        "hbox",
-        "iframe",
-        "image",
-        "key",
-        "keyset",
-        "label",
-        "listbox",
-        "listcell",
-        "listcol",
-        "listcols",
-        "listhead",
-        "listheader",
-        "listitem",
-        "member",
-        "menu",
-        "menubar",
-        "menuitem",
-        "menulist",
-        "menupopup",
-        "menuseparator",
-        "observes",
-        "overlay",
-        "page",
-        "popup",
-        "popupset",
-        "preference",
-        "preferences",
-        "prefpane",
-        "prefwindow",
-        "progressmeter",
-        "radio",
-        "radiogroup",
-        "resizer",
-        "richlistbox",
-        "richlistitem",
-        "row",
-        "rows",
-        "rule",
-        "script",
-        "scrollbar",
-        "scrollbox",
-        "scrollcorner",
-        "separator",
-        "spacer",
-        "splitter",
-        "stack",
-        "statusbar",
-        "statusbarpanel",
-        "stringbundle",
-        "stringbundleset",
-        "tab",
-        "tabbrowser",
-        "tabbox",
-        "tabpanel",
-        "tabpanels",
-        "tabs",
-        "template",
-        "textnode",
-        "textbox",
-        "titlebar",
-        "toolbar",
-        "toolbarbutton",
-        "toolbargrippy",
-        "toolbaritem",
-        "toolbarpalette",
-        "toolbarseparator",
-        "toolbarset",
-        "toolbarspacer",
-        "toolbarspring",
-        "toolbox",
-        "tooltip",
-        "tree",
-        "treecell",
-        "treechildren",
-        "treecol",
-        "treecols",
-        "treeitem",
-        "treerow",
-        "treeseparator",
-        "triple",
-        "vbox",
-        "window",
-        "wizard",
-        "wizardpage"
-      ];
-      var SVGElementTagNames = [
-        "a",
-        "animate",
-        "animateMotion",
-        "animateTransform",
-        "circle",
-        "clipPath",
-        "defs",
-        "desc",
-        "ellipse",
-        "feBlend",
-        "feColorMatrix",
-        "feComponentTransfer",
-        "feComposite",
-        "feConvolveMatrix",
-        "feDiffuseLighting",
-        "feDisplacementMap",
-        "feDistantLight",
-        "feDropShadow",
-        "feFlood",
-        "feFuncA",
-        "feFuncB",
-        "feFuncG",
-        "feFuncR",
-        "feGaussianBlur",
-        "feImage",
-        "feMerge",
-        "feMergeNode",
-        "feMorphology",
-        "feOffset",
-        "fePointLight",
-        "feSpecularLighting",
-        "feSpotLight",
-        "feTile",
-        "feTurbulence",
-        "filter",
-        "foreignObject",
-        "g",
-        "image",
-        "line",
-        "linearGradient",
-        "marker",
-        "mask",
-        "metadata",
-        "mpath",
-        "path",
-        "pattern",
-        "polygon",
-        "polyline",
-        "radialGradient",
-        "rect",
-        "script",
-        "set",
-        "stop",
-        "style",
-        "svg",
-        "switch",
-        "symbol",
-        "text",
-        "textPath",
-        "title",
-        "tspan",
-        "use",
-        "view"
-      ];
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/managers/preferencePane.js
-  var require_preferencePane2 = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/preferencePane.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.PreferencePaneManager = void 0;
-      var ui_1 = require_ui2();
-      var basic_1 = require_basic();
-      var PreferencePaneManager2 = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.alive = true;
-          this.ui = new ui_1.UITool(this);
-          this.prefPaneCache = { win: void 0, listeners: {} };
-        }
-        /**
-         * Register a preference pane from an xhtml, for Zotero 6 & 7.
-         * @remarks
-         * Don't forget to call `unregisterPrefPane` on exit.
-         * @remarks
-         * options:
-         * ```ts
-         * export interface PrefPaneOptions {
-         *   pluginID: string;
-         *   src: string;
-         *   id?: string;
-         *   parent?: string;
-         *   label?: string;
-         *   image?: string;
-         *   extraDTD?: string[];
-         *   scripts?: string[];
-         *   defaultXUL?: boolean;
-         *   // Only for Zotero 6
-         *   onload?: (win: Window) => any;
-         * }
-         * ```
-         *
-         * @param options See {@link PrefPaneOptions}
-         * @example
-         * ```ts
-         * const prefsManager = new PreferencePaneManager();
-         * function initPrefs() {
-         *   const prefOptions = {
-         *     pluginID: addonID,
-         *     src: rootURI + "chrome/content/preferences.xhtml",
-         *     label: "Template",
-         *     image: `chrome://${addonRef}/content/icons/favicon.png`,
-         *     extraDTD: [`chrome://${addonRef}/locale/overlay.dtd`],
-         *     defaultXUL: true
-         *   };
-         *   prefsManager.register(prefOptions);
-         * };
-         *
-         * function unInitPrefs() {
-         *   prefsManager.unregisterAll();
-         * };
-         * ```
-         * // bootstrap.js:startup
-         * initPrefs();
-         *
-         * // bootstrap.js:shutdown
-         * unInitPrefs();
-         */
-        register(options) {
-          if (this.isZotero7()) {
-            this.getGlobal("Zotero").PreferencePanes.register(options);
-            return;
-          }
-          const _initImportedNodesPostInsert = (container) => {
-            var _a;
-            const _observerSymbols = /* @__PURE__ */ new Map();
-            const Zotero2 = this.getGlobal("Zotero");
-            const window2 = container.ownerGlobal;
-            let useChecked = (elem) => elem instanceof window2.HTMLInputElement && elem.type == "checkbox" || elem.tagName == "checkbox";
-            let syncFromPref = (elem, preference) => {
-              let value = Zotero2.Prefs.get(preference, true);
-              if (useChecked(elem)) {
-                elem.checked = value;
-              } else {
-                elem.value = value;
-              }
-              elem.dispatchEvent(new window2.Event("syncfrompreference"));
-            };
-            let syncToPrefOnModify = (event) => {
-              const targetNode = event.currentTarget;
-              if (targetNode === null || targetNode === void 0 ? void 0 : targetNode.getAttribute("preference")) {
-                let value = useChecked(targetNode) ? targetNode.checked : targetNode.value;
-                Zotero2.Prefs.set(targetNode.getAttribute("preference") || "", value, true);
-                targetNode.dispatchEvent(new window2.Event("synctopreference"));
-              }
-            };
-            let attachToPreference = (elem, preference) => {
-              Zotero2.debug(`Attaching <${elem.tagName}> element to ${preference}`);
-              let symbol = Zotero2.Prefs.registerObserver(preference, () => syncFromPref(elem, preference), true);
-              _observerSymbols.set(elem, symbol);
-            };
-            let detachFromPreference = (elem) => {
-              if (_observerSymbols.has(elem)) {
-                Zotero2.debug(`Detaching <${elem.tagName}> element from preference`);
-                Zotero2.Prefs.unregisterObserver(this._observerSymbols.get(elem));
-                _observerSymbols.delete(elem);
-              }
-            };
-            for (let elem of Array.from(container.querySelectorAll("[preference]"))) {
-              let preference = elem.getAttribute("preference");
-              if (container.querySelector("preferences > preference#" + preference)) {
-                this.log("<preference> is deprecated -- `preference` attribute values should be full preference keys, not <preference> IDs");
-                preference = (_a = container.querySelector("preferences > preference#" + preference)) === null || _a === void 0 ? void 0 : _a.getAttribute("name");
-              }
-              attachToPreference(elem, preference);
-              elem.addEventListener(this.isXULElement(elem) ? "command" : "input", syncToPrefOnModify);
-              window2.setTimeout(() => {
-                syncFromPref(elem, preference);
-              });
-            }
-            new window2.MutationObserver((mutations) => {
-              for (let mutation of mutations) {
-                if (mutation.type == "attributes") {
-                  let target = mutation.target;
-                  detachFromPreference(target);
-                  if (target.hasAttribute("preference")) {
-                    attachToPreference(target, target.getAttribute("preference") || "");
-                    target.addEventListener(this.isXULElement(target) ? "command" : "input", syncToPrefOnModify);
-                  }
-                } else if (mutation.type == "childList") {
-                  for (let node of Array.from(mutation.removedNodes)) {
-                    detachFromPreference(node);
-                  }
-                  for (let node of Array.from(mutation.addedNodes)) {
-                    if (node.nodeType == window2.Node.ELEMENT_NODE && node.hasAttribute("preference")) {
-                      attachToPreference(node, node.getAttribute("preference") || "");
-                      node.addEventListener(this.isXULElement(node) ? "command" : "input", syncToPrefOnModify);
-                    }
-                  }
-                }
-              }
-            }).observe(container, {
-              childList: true,
-              subtree: true,
-              attributeFilter: ["preference"]
-            });
-            for (let elem of Array.from(container.querySelectorAll("[oncommand]"))) {
-              elem.oncommand = elem.getAttribute("oncommand");
-            }
-            for (let child of Array.from(container.children)) {
-              child.dispatchEvent(new window2.Event("load"));
-            }
-          };
-          const windowListener = {
-            onOpenWindow: (xulWindow) => {
-              if (!this.alive) {
-                return;
-              }
-              const win = xulWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindow);
-              win.addEventListener("load", async () => {
-                var _a;
-                if (win.location.href === "chrome://zotero/content/preferences/preferences.xul") {
-                  this.log("registerPrefPane:detected", options);
-                  const Zotero2 = this.getGlobal("Zotero");
-                  options.id || (options.id = `plugin-${Zotero2.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`);
-                  const contentOrXHR = await Zotero2.File.getContentsAsync(options.src);
-                  const content = typeof contentOrXHR === "string" ? contentOrXHR : contentOrXHR.response;
-                  const src = `<prefpane xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" id="${options.id}" insertafter="zotero-prefpane-advanced" label="${options.label || options.pluginID}" image="${options.image || ""}">
-                ${content}
-                </prefpane>`;
-                  const frag = this.ui.parseXHTMLToFragment(src, options.extraDTD, options.defaultXUL);
-                  this.log(frag);
-                  const prefWindow = win.document.querySelector("prefwindow");
-                  prefWindow.appendChild(frag);
-                  const prefPane = win.document.querySelector(`#${options.id}`);
-                  prefWindow.addPane(prefPane);
-                  const contentBox = win.document.getAnonymousNodes(win.document.querySelector(`#${options.id}`))[0];
-                  contentBox.style.overflowY = "scroll";
-                  contentBox.style.height = "440px";
-                  win.sizeToContent();
-                  if (contentBox.scrollHeight === contentBox.clientHeight) {
-                    contentBox.style.overflowY = "hidden";
-                  }
-                  this.prefPaneCache.win = win;
-                  this.prefPaneCache.listeners[options.id] = windowListener;
-                  _initImportedNodesPostInsert(prefPane);
-                  if ((_a = options.scripts) === null || _a === void 0 ? void 0 : _a.length) {
-                    options.scripts.forEach((script) => Services.scriptloader.loadSubScript(script, win));
-                  }
-                  if (options.onload) {
-                    options.onload(win);
-                  }
-                }
-              }, false);
-            }
-          };
-          Services.wm.addListener(windowListener);
-        }
-        unregister(id) {
-          var _a;
-          const idx = Object.keys(this.prefPaneCache.listeners).indexOf(id);
-          if (idx < 0) {
-            return false;
-          }
-          const listener = this.prefPaneCache.listeners[id];
-          Services.wm.removeListener(listener);
-          listener.onOpenWindow = void 0;
-          const win = this.prefPaneCache.win;
-          if (win && !win.closed) {
-            (_a = win.document.querySelector(`#${id}`)) === null || _a === void 0 ? void 0 : _a.remove();
-          }
-          delete this.prefPaneCache.listeners[id];
-          return true;
-        }
-        /**
-         * Unregister all preference panes added with this instance
-         *
-         * Called on exiting
-         */
-        unregisterAll() {
-          this.alive = false;
-          for (const id in this.prefPaneCache.listeners) {
-            this.unregister(id);
-          }
-        }
-      };
-      exports.PreferencePaneManager = PreferencePaneManager2;
-    }
-  });
-
   // src/index.ts
-  var import_basic2 = __toESM(require_basic());
+  var import_basic = __toESM(require_basic());
 
   // package.json
   var config = {
@@ -6175,12 +5375,12 @@ body {
   // src/modules/views.ts
   var Views = class {
     constructor() {
+      this.view = "Annotation";
       this.registerButton();
-      const OS = window.OS;
       this.zoteroDir = Zotero.DataDirectory._dir;
-      this.addonDir = OS.Path.join(this.zoteroDir, config.addonRef);
-      this.dataDir = OS.Path.join(this.addonDir, "data");
-      this.figureDir = OS.Path.join(this.addonDir, "figure");
+      this.addonDir = PathUtils.join(this.zoteroDir, config.addonRef);
+      this.dataDir = PathUtils.join(this.addonDir, "data");
+      this.figureDir = PathUtils.join(this.addonDir, "figure");
       ztoolkit.UI.appendElement({
         tag: "div",
         styles: {
@@ -6204,10 +5404,46 @@ body {
           );
         }
       });
+      addon.api.views = this;
+    }
+    async addToNote(item) {
+      const popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Add To Note", type: "default" }).show();
+      let annos = item.getAnnotations();
+      annos = annos.filter((a) => a.annotationType == "image" && a.getTags()?.[0]?.tag?.match(/^(Figure|Table)/));
+      await Zotero.EditorInstance.createNoteFromAnnotations(
+        annos,
+        // @ts-ignore
+        { parentID: item.parentID }
+      );
+      popupWin.changeLine({ type: "success" });
+      popupWin.startCloseTimer(1e3);
+    }
+    async getReaderInstance(itemID, focus = false) {
+      let reader;
+      const tab = Zotero_Tabs._tabs.find((tab2) => tab2.type == "reader" && tab2.data.itemID == itemID);
+      if (tab) {
+        if (tab.type == "reader-unloaded") {
+          Zotero_Tabs.close(tab.id);
+        } else {
+          reader = Zotero.Reader.getByTabID(tab.id);
+        }
+      }
+      reader = reader || await Zotero.Reader.open(
+        itemID,
+        void 0,
+        { openInBackground: !focus }
+      );
+      if (!reader) {
+        return this.getReaderInstance(itemID, focus);
+      }
+      while (!reader?._internalReader?._lastView?._iframeWindow?.PDFViewerApplication?.pdfDocument) {
+        await Zotero.Promise.delay(100);
+      }
+      return reader;
     }
     /**
-    * 注册所有按钮
-    */
+     * 注册所有按钮
+     */
     registerButton() {
       const notifierID = Zotero.Notifier.registerObserver({
         notify: async (event, type, ids, extraData) => {
@@ -6233,22 +5469,18 @@ body {
       }
       const parent = _window.document.querySelector("#reader-ui .toolbar .start");
       const ref = parent.querySelector("#pageNumber");
-      let timer, isFigure = false;
       this.button = ztoolkit.UI.insertElementBefore({
         ignoreIfExists: true,
         namespace: "html",
         tag: "button",
         id: config.addonRef,
-        classList: ["toolbarButton"],
+        classList: ["toolbar-button"],
         styles: {
-          // 解决图标
-          backgroundImage: `url(chrome://${config.addonRef}/content/icons/favicon.png)`,
-          backgroundSize: "16px 16px",
-          backgroundPosition: "35% center",
-          backgroundRepeat: "no-repeat",
-          width: "45px",
+          // margin: "0 .6em",
+          width: "40px",
           filter: "grayscale(100%)",
-          padding: "4px 3px 4px 22px"
+          display: "flex",
+          alignItems: "center"
         },
         attributes: {
           title: config.addonName,
@@ -6263,98 +5495,121 @@ body {
                 tag: "menupopup",
                 id: config.addonRef + "-menupopup",
                 namespace: "xul",
-                children: []
+                children: [
+                  {
+                    tag: "menuitem",
+                    attributes: {
+                      label: "PDF\u56FE\u8868\u89E3\u6790"
+                    },
+                    listeners: [
+                      {
+                        type: "command",
+                        listener: () => {
+                          this.addAnnotations(reader._item.id);
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    tag: "menuseparator"
+                  },
+                  {
+                    tag: "menuitem",
+                    attributes: {
+                      label: "\u4EC5\u663E\u793A\u56FE\u8868",
+                      type: "checkbox",
+                      checked: this.view == "Figure"
+                    },
+                    listeners: [
+                      {
+                        type: "command",
+                        listener: () => {
+                          this.clearFilter(reader);
+                          if (this.view != "Figure") {
+                            this.switchToView(reader, "Figure");
+                          } else {
+                            this.switchToView(reader, "All");
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    tag: "menuitem",
+                    attributes: {
+                      label: "\u4EC5\u663E\u793A\u6807\u6CE8",
+                      type: "checkbox",
+                      checked: this.view == "Annotation"
+                    },
+                    listeners: [
+                      {
+                        type: "command",
+                        listener: () => {
+                          this.clearFilter(reader);
+                          if (this.view != "Annotation") {
+                            this.switchToView(reader, "Annotation");
+                          } else {
+                            this.switchToView(reader, "All");
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    tag: "menuseparator"
+                  },
+                  {
+                    tag: "menuitem",
+                    attributes: {
+                      label: "\u56FE\u8868\u8F6C\u7B14\u8BB0"
+                    },
+                    listeners: [
+                      {
+                        type: "command",
+                        listener: async () => {
+                          await this.addToNote(reader._item);
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    tag: "menuitem",
+                    attributes: {
+                      label: "\u6E05\u7A7A\u56FE\u8868"
+                    },
+                    listeners: [
+                      {
+                        type: "click",
+                        listener: async () => {
+                          const popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Remove All Figures", type: "default" }).show();
+                          this.switchToView(reader, "Figure", false);
+                          let annos = reader._item.getAnnotations();
+                          annos = annos.filter((a) => a.annotationType == "image" && a.getTags()?.[0]?.tag?.match(/^(Figure|Table)/));
+                          await Promise.all(annos.map(async (anno) => await anno.eraseTx()));
+                          popupWin.changeLine({ type: "success" });
+                          popupWin.startCloseTimer(1e3);
+                          this.button.style.filter = "grayscale(100%)";
+                          this.switchToView(reader, "Annotation", false);
+                        }
+                      }
+                    ]
+                  }
+                ]
               }, document.querySelector("#browser"));
-              const menuitem0 = ztoolkit.UI.appendElement({
-                tag: "menuitem",
-                attributes: {
-                  label: "PDF\u56FE\u8868\u89E3\u6790"
-                }
-              }, menupopup);
-              menuitem0.addEventListener("command", () => {
-                this.addAnnotation(reader);
-              });
-              const menuitem1 = ztoolkit.UI.appendElement({
-                tag: "menuitem",
-                attributes: {
-                  label: "\u663E\u793A\u56FE\u8868 & \u9690\u85CF\u6807\u6CE8"
-                }
-              }, menupopup);
-              menuitem1.addEventListener("command", () => {
-                this.clearFilter(reader);
-                this.switchView(reader, true);
-              });
-              const menuitem2 = ztoolkit.UI.appendElement({
-                tag: "menuitem",
-                attributes: {
-                  label: "\u663E\u793A\u6807\u6CE8 & \u9690\u85CF\u56FE\u8868"
-                }
-              }, menupopup);
-              menuitem2.addEventListener("command", () => {
-                this.clearFilter(reader);
-                this.switchView(reader, false);
-              });
-              const menuitem3 = ztoolkit.UI.appendElement({
-                tag: "menuitem",
-                attributes: {
-                  label: "\u56FE\u8868\u8F6C\u7B14\u8BB0"
-                }
-              }, menupopup);
-              menuitem3.addEventListener("command", async () => {
-                const popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Add To Note", type: "default" }).show();
-                let annos = reader._item.getAnnotations();
-                annos = annos.filter((a) => a.annotationType == "image" && a.getTags()[0].tag.match(/^(Figure|Table)/));
-                const note = await createNoteFromAnnotations(
-                  annos,
-                  // @ts-ignore
-                  { parentID: reader._item.parentID }
-                );
-                popupWin.changeLine({ type: "success" });
-                popupWin.startCloseTimer(1e3);
-              });
-              const menuitem4 = ztoolkit.UI.appendElement({
-                tag: "menuitem",
-                attributes: {
-                  label: "\u6E05\u7A7A\u56FE\u8868"
-                }
-              }, menupopup);
-              menuitem4.addEventListener("command", async () => {
-                const popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Remove All Figures", type: "default" }).show();
-                this.switchView(reader, true, false);
-                let annos = reader._item.getAnnotations();
-                annos = annos.filter((a) => a.annotationType == "image" && a.getTags()[0].tag.match(/^(Figure|Table)/));
-                await Promise.all(annos.map(async (anno) => await anno.eraseTx()));
-                popupWin.changeLine({ type: "success" });
-                popupWin.startCloseTimer(1e3);
-                this.button.style.filter = "grayscale(100%)";
-                this.switchView(reader, false, false);
-              });
               menupopup.openPopup(this.button, "after_start", 0, 0, false, false);
             }
           }
         ],
-        children: [
-          {
-            tag: "span",
-            classList: ["dropmarker"],
-            styles: {
-              background: "url(assets/icons/searchbar-dropmarker@2x.4ebeb64c.png) no-repeat 0 0/100%",
-              display: "inline-block",
-              height: "4px",
-              margin: "6px 0",
-              marginInlineStart: "2px",
-              position: "relative",
-              verticalAlign: "top",
-              width: "7px",
-              zIndex: "1"
-            }
-          }
-        ]
+        properties: {
+          innerHTML: `
+        <span style="background: url(chrome://${config.addonRef}/content/icons/favicon.png); background-size: 16px 16px; background-position: 35% center; background-repeat: no-repeat; display:block;width: 16px;height: 16px;margin-right: 5px;"></span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" fill="none"><path fill="currentColor" d="m0 2.707 4 4 4-4L7.293 2 4 5.293.707 2z"></path></svg>`
+        }
       }, ref);
       if (reader._item.getAnnotations().find((i) => i.getTags().find((t) => t.tag.match(/^(Figure|Table)/)))) {
         this.button.style.filter = "none";
       }
-      this.switchView(reader, false, false);
+      this.switchToView(reader, "Annotation", false);
     }
     clearFilter(reader) {
       const am = reader._internalReader._annotationManager;
@@ -6369,10 +5624,10 @@ body {
      * @param reader 
      * @param isFigure 
      */
-    switchView(reader, isFigure, isPopup = true) {
+    switchToView(reader, view, isPopup = true) {
       let popupWin;
       if (isPopup) {
-        popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Switch to " + (isFigure ? "Figure" : "Normal") + " view", type: "default" }).show();
+        popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Switch to " + view + " view", type: "default" }).show();
       }
       const am = reader._internalReader._annotationManager;
       am._render = am._render || am.render;
@@ -6380,7 +5635,7 @@ body {
         const isFilter = !(am._filter.authors.length == 0 && am._filter.colors.length == 0 && am._filter.query == "" && am._filter.tags.length == 0);
         am._annotations.forEach((anno) => {
           if (anno.tags.find((tag) => tag.name.startsWith("Figure") || tag.name.startsWith("Table"))) {
-            if (!isFigure) {
+            if (view == "Annotation") {
               anno._hidden = true;
             } else {
               if (!isFilter) {
@@ -6388,7 +5643,7 @@ body {
               }
             }
           } else {
-            if (isFigure) {
+            if (view == "Figure") {
               anno._hidden = true;
             } else {
               if (!isFilter) {
@@ -6400,6 +5655,7 @@ body {
         am._render();
       };
       am.render();
+      this.view = view;
       if (popupWin) {
         popupWin.changeLine({ type: "success" });
         popupWin.startCloseTimer(1e3);
@@ -6407,7 +5663,7 @@ body {
     }
     async getValidPDFFilepath(pdfItem) {
       let filepath = await pdfItem.getFilePathAsync();
-      const origName = window.OS.Path.basename(filepath);
+      const origName = PathUtils.split(filepath).slice(-1)[0];
       if (origName.indexOf(",") >= 0) {
         const newName = origName.replace(/,/g, "_");
         if (Zotero.Prompt.confirm({
@@ -6429,7 +5685,7 @@ body {
       while (files.hasMoreElements()) {
         const file = files.getNext().QueryInterface(Components.interfaces.nsIFile);
         if (file.leafName.startsWith(pdfItem.key)) {
-          filepath = window.OS.Path.join(this.dataDir, file.leafName);
+          filepath = window.PathUtils.join(this.dataDir, file.leafName);
           break;
         }
       }
@@ -6442,67 +5698,87 @@ body {
       }
       return JSON.parse(rawString);
     }
-    async getFigures(reader, popupWin) {
-      const pdfItem = reader._item;
-      const filename = await this.getValidPDFFilepath(reader._item);
-      const OS = window.OS;
+    async getFigures(pdfItem, isFigure, popupWin) {
+      const filename = await this.getValidPDFFilepath(pdfItem);
       const javaPath = Zotero.Prefs.get(`${config.addonRef}.path.java`);
+      const jarPath = PathUtils.join(this.zoteroDir, "pdffigures2.jar");
       if (!javaPath) {
-        window.alert("Java\u8DEF\u5F84\u5C1A\u672A\u914D\u7F6E");
+        window.alert("Java\u8DEF\u5F84\u5C1A\u672A\u914D\u7F6E\uFF0C\u8BF7\u53C2\u8003https://github.com/MuiseDestiny/zotero-figure\u914D\u7F6E");
         return [];
       }
-      const args = [
+      if (!await IOUtils.exists(javaPath)) {
+        window.alert("Java\u4E0D\u5B58\u5728\uFF0C\u8BF7\u91CD\u65B0\u914D\u7F6E\uFF0C\u8BF7\u53C2\u8003https://github.com/MuiseDestiny/zotero-figure\u914D\u7F6E");
+        return [];
+      }
+      if (!await IOUtils.exists(jarPath)) {
+        window.alert(`pdffigures2.jar\u4E0D\u5B58\u5728\uFF0C\u8BF7\u91CD\u65B0\u4E0B\u8F7D\uFF0C\u5E76\u79FB\u52A8\u5230 ${this.zoteroDir} \u4E0B\uFF0C\u8BF7\u53C2\u8003https://github.com/MuiseDestiny/zotero-figure\u4E0B\u8F7D`);
+        return [];
+      }
+      let args = [
         "-jar",
-        OS.Path.join(this.zoteroDir, "pdffigures2.jar"),
+        jarPath,
         filename,
         "-d",
-        OS.Path.join(this.dataDir, pdfItem.key)
+        PathUtils.join(this.dataDir, pdfItem.key)
         // "-m",
         // this.figureDir + "/",
         // "-i",
         // "300",
-        // "-t",
-        // "8"
       ];
-      if (!await OS.File.exists(this.addonDir)) {
-        await OS.File.makeDir(this.addonDir);
+      if (isFigure) {
+        args = [...args, ...[
+          "-m",
+          this.figureDir + "/",
+          "-i",
+          "300"
+        ]];
       }
-      if (!await OS.File.exists(this.dataDir)) {
-        await OS.File.makeDir(this.dataDir);
+      if (!await IOUtils.exists(this.addonDir)) {
+        await IOUtils.makeDirectory(this.addonDir);
       }
-      if (!await OS.File.exists(this.figureDir)) {
-        await OS.File.makeDir(this.figureDir);
+      if (!await IOUtils.exists(this.dataDir)) {
+        await IOUtils.makeDirectory(this.dataDir);
+      }
+      if (!await IOUtils.exists(this.figureDir)) {
+        await IOUtils.makeDirectory(this.figureDir);
       }
       let targetFile;
-      popupWin.createLine({ text: "Parsing figures...", type: "default" });
-      await Zotero.Utilities.Internal.exec(javaPath, args);
-      popupWin.createLine({ text: "Searching json...", type: "default" });
+      popupWin?.createLine({ text: "Parsing figures...", type: "default" });
+      ztoolkit.log(javaPath, args);
+      try {
+        await Zotero.Utilities.Internal.exec(javaPath, args);
+      } catch (e) {
+        ztoolkit.log(e);
+      }
+      popupWin?.createLine({ text: "Searching json...", type: "default" });
       let count = 0;
       while (!(targetFile = this.getJsonFilepath(pdfItem)) && count < 3) {
         await Zotero.Promise.delay(1e3);
         count += 1;
       }
       if (targetFile) {
-        popupWin.createLine({ text: "Reading json...", type: "success" });
+        popupWin?.createLine({ text: "Reading json...", type: "success" });
         const figures = await this.readAsJson(targetFile);
         if (figures.length == 0) {
-          popupWin.createLine({ text: "No figures were parsed", type: "default" });
-          popupWin.createLine({ text: "Finished", type: "default" });
-          popupWin.startCloseTimer(3e3);
+          popupWin?.createLine({ text: "No figures were parsed", type: "default" });
+          popupWin?.createLine({ text: "Finished", type: "default" });
+          popupWin?.startCloseTimer(3e3);
         }
         return figures;
       } else {
-        popupWin.createLine({ text: "Not Found", type: "fail" });
+        popupWin?.createLine({ text: "Not Found", type: "fail" });
         return [];
       }
     }
-    async addAnnotation(reader) {
+    async addAnnotations(itemID) {
+      const reader = await this.getReaderInstance(itemID);
       const popupWin = new ztoolkit.ProgressWindow(config.addonName.split(" ").slice(-1)[0], { closeOtherProgressWindows: true, closeTime: -1 }).createLine({ text: "Start", type: "default" }).show();
-      const figures = await this.getFigures(reader, popupWin);
-      ztoolkit.log(figures);
+      const figures = await this.getFigures(await Zotero.Items.getAsync(itemID), false, popupWin);
       if (figures.length) {
-        this.button.style.filter = "none";
-        this.switchView(reader, true, false);
+        window.setTimeout(() => {
+          this.button.style.filter = "none";
+        });
+        this.switchToView(reader, "Figure", false);
         const t = figures.length;
         const idx = popupWin.lines.length;
         popupWin.createLine({ text: `[0/${t}] Add to Annotation`, progress: 0, type: "default" });
@@ -6515,7 +5791,7 @@ body {
           figure.regionBoundary.y2 = y2;
           await generateImageAnnotation(
             Zotero,
-            Zotero_Tabs,
+            reader,
             figure.page,
             Object.values(figure.regionBoundary),
             figure.caption,
@@ -6535,8 +5811,10 @@ body {
         });
         popupWin.changeLine({ text: "Done", type: "success", idx });
         popupWin.startCloseTimer(3e3);
-        this.switchView(reader, false, false);
+        this.switchToView(reader, "Annotation", false);
       }
+      ztoolkit.log("render");
+      await Zotero.PDFRenderer.renderAttachmentAnnotations(itemID);
     }
   };
   function flattenChars(structuredText) {
@@ -6653,8 +5931,7 @@ body {
     }
     return randomstring;
   }
-  async function generateImageAnnotation(Zotero2, Zotero_Tabs2, pageIndex, rect, comment, tag) {
-    const reader = Zotero2.Reader.getByTabID(Zotero_Tabs2._tabs[Zotero_Tabs2.selectedIndex].id);
+  async function generateImageAnnotation(Zotero2, reader, pageIndex, rect, comment, tag) {
     const pdfPages = reader._internalReader._primaryView._pdfPages;
     const attachment = reader._item;
     let annotation = {
@@ -6683,104 +5960,6 @@ body {
     const savedAnnotation = await Zotero2.Annotations.saveFromJSON(attachment, annotation);
     savedAnnotation.addTag(tag);
     await savedAnnotation.saveTx();
-  }
-  async function createNoteFromAnnotations(annotations, { parentID, collectionID } = {}) {
-    if (!annotations.length) {
-      throw new Error("No annotations provided");
-    }
-    for (let annotation of annotations) {
-      if (annotation.annotationType === "image" && !await Zotero.Annotations.hasCacheImage(annotation)) {
-        try {
-          await Zotero.PDFRenderer.renderAttachmentAnnotations(annotation.parentID);
-        } catch (e) {
-          Zotero.debug(e);
-          throw e;
-        }
-        break;
-      }
-    }
-    let note = new Zotero.Item("note");
-    note.libraryID = annotations[0].libraryID;
-    if (parentID) {
-      note.parentID = parentID;
-    } else if (collectionID) {
-      note.addToCollection(collectionID);
-    }
-    await note.saveTx();
-    let editorInstance = new Zotero.EditorInstance();
-    editorInstance._item = note;
-    let jsonAnnotations = [];
-    for (let annotation of annotations) {
-      let attachmentItem = Zotero.Items.get(annotation.parentID);
-      let jsonAnnotation = await Zotero.Annotations.toJSON(annotation);
-      jsonAnnotation.attachmentItemID = attachmentItem.id;
-      jsonAnnotation.id = annotation.key;
-      jsonAnnotations.push(jsonAnnotation);
-    }
-    let vars = {
-      title: "\u56FE\u8868",
-      date: (/* @__PURE__ */ new Date()).toLocaleString()
-    };
-    let html = Zotero.Utilities.Internal.generateHTMLFromTemplate(Zotero.Prefs.get("annotations.noteTemplates.title"), vars);
-    html += "\n";
-    await editorInstance.importImages(jsonAnnotations);
-    let multipleParentParent = false;
-    let lastParentParentID;
-    let lastParentID;
-    let groups = [];
-    for (let i = 0; i < annotations.length; i++) {
-      let annotation = annotations[i];
-      let jsonAnnotation = jsonAnnotations[i];
-      let parentParentID = annotation.parentItem.parentID;
-      let parentID2 = annotation.parentID;
-      if (groups.length) {
-        if (parentParentID !== lastParentParentID) {
-          multipleParentParent = true;
-        }
-      }
-      if (!groups.length || parentID2 !== lastParentID) {
-        groups.push({
-          parentTitle: annotation.parentItem.getDisplayTitle(),
-          parentParentID,
-          parentParentTitle: annotation.parentItem.parentItem && annotation.parentItem.parentItem.getDisplayTitle(),
-          jsonAnnotations: [jsonAnnotation]
-        });
-      } else {
-        let group = groups[groups.length - 1];
-        group.jsonAnnotations.push(jsonAnnotation);
-      }
-      lastParentParentID = parentParentID;
-      lastParentID = parentID2;
-    }
-    let citationItems = [];
-    lastParentParentID = null;
-    for (let group of groups) {
-      if (multipleParentParent && group.parentParentTitle && lastParentParentID !== group.parentParentID) {
-        html += `<h2>${group.parentParentTitle}</h2>
-`;
-      }
-      lastParentParentID = group.parentParentID;
-      if (!group.parentParentID || groups.filter((x) => x.parentParentID === group.parentParentID).length > 1) {
-        html += `<h3>${group.parentTitle}</h3>
-`;
-      }
-      let { html: _html, citationItems: _citationItems } = Zotero.EditorInstanceUtilities.serializeAnnotations(group.jsonAnnotations, true);
-      html += _html + "\n";
-      for (let _citationItem of _citationItems) {
-        if (!citationItems.find((item) => item.uris.some((uri) => _citationItem.uris.includes(uri)))) {
-          citationItems.push(_citationItem);
-        }
-      }
-    }
-    citationItems = window.encodeURIComponent(JSON.stringify(citationItems));
-    let schemaVersion = 9;
-    if (schemaVersion === 9 && annotations.some((x) => x.annotationType === "underline")) {
-      schemaVersion = 10;
-    }
-    html = `<div data-citation-items="${citationItems}" data-schema-version="${schemaVersion}">${html}</div>`;
-    note.setNote(html);
-    await note.saveTx();
-    return note;
   }
 
   // src/hooks.ts
@@ -6832,9 +6011,6 @@ body {
 
   // src/utils/ztoolkit.ts
   var import_zotero_plugin_toolkit = __toESM(require_dist());
-  var import_basic = __toESM(require_basic());
-  var import_ui = __toESM(require_ui2());
-  var import_preferencePane = __toESM(require_preferencePane2());
   function createZToolkit() {
     const _ztoolkit = new import_zotero_plugin_toolkit.default();
     initZToolkit(_ztoolkit);
@@ -6868,7 +6044,7 @@ body {
   var addon_default = Addon;
 
   // src/index.ts
-  var basicTool = new import_basic2.BasicTool();
+  var basicTool = new import_basic.BasicTool();
   if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
     _globalThis.Zotero = basicTool.getGlobal("Zotero");
     defineGlobal("window");

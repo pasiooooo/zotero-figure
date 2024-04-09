@@ -15,9 +15,9 @@ export default class Views {
     // @ts-ignore
     const OS = window.OS
     this.zoteroDir = Zotero.DataDirectory._dir
-    this.addonDir = OS.Path.join(this.zoteroDir, config.addonRef)
-    this.dataDir = OS.Path.join(this.addonDir, "data")
-    this.figureDir = OS.Path.join(this.addonDir, "figure")
+    this.addonDir = PathUtils.join(this.zoteroDir, config.addonRef)
+    this.dataDir = PathUtils.join(this.addonDir, "data")
+    this.figureDir = PathUtils.join(this.addonDir, "figure")
 
     ztoolkit.UI.appendElement({
       tag: 'div',
@@ -198,7 +198,7 @@ export default class Views {
       const file = files.getNext().QueryInterface(Components.interfaces.nsIFile);
       if ((file.leafName as string).startsWith(pdfItem.key)) {
         // @ts-ignore
-        filepath = window.OS.Path.join(this.dataDir, file.leafName)
+        filepath = window.PathUtils.join(this.dataDir, file.leafName)
         break
       }
     }
@@ -231,10 +231,10 @@ export default class Views {
 
     const args = [
       "-jar",
-      OS.Path.join(this.zoteroDir, "pdffigures2.jar"),
+      PathUtils.join(this.zoteroDir, "pdffigures2.jar"),
       filename,
       "-d",
-      OS.Path.join(this.dataDir, pdfItem.key),
+      PathUtils.join(this.dataDir, pdfItem.key),
       // "-m",
       // this.figureDir + "/",
       // "-i",
@@ -242,14 +242,14 @@ export default class Views {
       // "-t",
       // "8"
     ]
-    if (!await OS.File.exists(this.addonDir)) {
-      await OS.File.makeDir(this.addonDir);
+    if (!await IOUtils.exists(this.addonDir)) {
+      await IOUtils.makeDirectory(this.addonDir);
     }
-    if (!await OS.File.exists(this.dataDir)) {
-      await OS.File.makeDir(this.dataDir);
+    if (!await IOUtils.exists(this.dataDir)) {
+      await IOUtils.makeDirectory(this.dataDir);
     }
-    if (!await OS.File.exists(this.figureDir)) {
-      await OS.File.makeDir(this.figureDir);
+    if (!await IOUtils.exists(this.figureDir)) {
+      await IOUtils.makeDirectory(this.figureDir);
     }
     let targetFile: string | undefined
     // if (!targetFile) {
