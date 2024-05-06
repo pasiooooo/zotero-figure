@@ -26,4 +26,12 @@ function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
     "default",
     `chrome://${config.addonRef}/content/icons/favicon.png`,
   );
+  _ztoolkit.ProgressWindow.setIconURI(
+    "success",
+    `chrome://zotero/skin/tick@2x.png`,
+  );
+  _ztoolkit.ProgressWindow.setIconURI(
+    "fail",
+    `chrome://zotero/skin/cross.png`,
+  );
 }

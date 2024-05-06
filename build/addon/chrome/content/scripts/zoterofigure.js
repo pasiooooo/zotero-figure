@@ -304,7 +304,7 @@ If you do not know what it is, please click Cancel to deny.`);
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
-      exports.unregister = exports.ManagerTool = exports.BasicTool = void 0;
+      exports.makeHelperTool = exports.unregister = exports.ManagerTool = exports.BasicTool = void 0;
       var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var BasicTool2 = class {
         get basicOptions() {
@@ -326,6 +326,15 @@ If you do not know what it is, please click Cancel to deny.`);
             debug: toolkitGlobal_1.default.getInstance().debugBridge,
             api: {
               pluginID: "zotero-plugin-toolkit@windingwind.com"
+            },
+            listeners: {
+              callbacks: {
+                onMainWindowLoad: /* @__PURE__ */ new Set(),
+                onMainWindowUnload: /* @__PURE__ */ new Set(),
+                onPluginUnload: /* @__PURE__ */ new Set()
+              },
+              _mainWindow: void 0,
+              _plugin: void 0
             }
           };
           this.updateOptions(data);
@@ -360,6 +369,9 @@ If you do not know what it is, please click Cancel to deny.`);
          */
         isZotero7() {
           return Zotero.platformMajorVersion >= 102;
+        }
+        isFX115() {
+          return Zotero.platformMajorVersion >= 115;
         }
         /**
          * Get DOMParser.
@@ -451,7 +463,7 @@ If you do not know what it is, please click Cancel to deny.`);
         }
         /**
          * Patch a function
-         * @deprecated Use `PatchManager` instead.
+         * @deprecated Use {@link PatchHelper} instead.
          * @param object The owner of the function
          * @param funcSign The signature of the function(function name)
          * @param ownerSign The signature of patch owner to avoid patching again
@@ -465,15 +477,116 @@ If you do not know what it is, please click Cancel to deny.`);
           object[funcSign] = patcher(object[funcSign]);
           object[funcSign][ownerSign] = true;
         }
+        /**
+         * Add a Zotero event listener callback
+         * @param type Event type
+         * @param callback Event callback
+         */
+        addListenerCallback(type, callback) {
+          if (["onMainWindowLoad", "onMainWindowUnload"].includes(type)) {
+            this._ensureMainWindowListener();
+          }
+          if (type === "onPluginUnload") {
+            this._ensurePluginListener();
+          }
+          this._basicOptions.listeners.callbacks[type].add(callback);
+        }
+        /**
+         * Remove a Zotero event listener callback
+         * @param type Event type
+         * @param callback Event callback
+         */
+        removeListenerCallback(type, callback) {
+          this._basicOptions.listeners.callbacks[type].delete(callback);
+          this._ensureRemoveListener();
+        }
+        /**
+         * Remove all Zotero event listener callbacks when the last callback is removed.
+         */
+        _ensureRemoveListener() {
+          const { listeners } = this._basicOptions;
+          if (listeners._mainWindow && listeners.callbacks.onMainWindowLoad.size === 0 && listeners.callbacks.onMainWindowUnload.size === 0) {
+            Services.wm.removeListener(listeners._mainWindow);
+            delete listeners._mainWindow;
+          }
+          if (listeners._plugin && listeners.callbacks.onPluginUnload.size === 0) {
+            Zotero.Plugins.removeObserver(listeners._plugin);
+            delete listeners._plugin;
+          }
+        }
+        /**
+         * Ensure the main window listener is registered.
+         */
+        _ensureMainWindowListener() {
+          if (this._basicOptions.listeners._mainWindow) {
+            return;
+          }
+          const mainWindowListener = {
+            onOpenWindow: (xulWindow) => {
+              const domWindow = xulWindow.docShell.domWindow;
+              const onload = async () => {
+                domWindow.removeEventListener("load", onload, false);
+                if (domWindow.location.href !== "chrome://zotero/content/zoteroPane.xhtml") {
+                  return;
+                }
+                for (const cbk of this._basicOptions.listeners.callbacks.onMainWindowLoad) {
+                  try {
+                    cbk(domWindow);
+                  } catch (e) {
+                    this.log(e);
+                  }
+                }
+              };
+              domWindow.addEventListener("load", () => onload(), false);
+            },
+            onCloseWindow: async (xulWindow) => {
+              const domWindow = xulWindow.docShell.domWindow;
+              if (domWindow.location.href !== "chrome://zotero/content/zoteroPane.xhtml") {
+                return;
+              }
+              for (const cbk of this._basicOptions.listeners.callbacks.onMainWindowUnload) {
+                try {
+                  cbk(domWindow);
+                } catch (e) {
+                  this.log(e);
+                }
+              }
+            }
+          };
+          this._basicOptions.listeners._mainWindow = mainWindowListener;
+          Services.wm.addListener(mainWindowListener);
+        }
+        /**
+         * Ensure the plugin listener is registered.
+         */
+        _ensurePluginListener() {
+          if (this._basicOptions.listeners._plugin) {
+            return;
+          }
+          const pluginListener = {
+            shutdown: (...args) => {
+              for (const cbk of this._basicOptions.listeners.callbacks.onPluginUnload) {
+                try {
+                  cbk(...args);
+                } catch (e) {
+                  this.log(e);
+                }
+              }
+            }
+          };
+          this._basicOptions.listeners._plugin = pluginListener;
+          Zotero.Plugins.addObserver(pluginListener);
+        }
         updateOptions(source) {
           if (!source) {
-            return;
+            return this;
           }
           if (source instanceof BasicTool2) {
             this._basicOptions = source._basicOptions;
           } else {
             this._basicOptions = source;
           }
+          return this;
         }
         static getZotero() {
           return typeof Zotero !== "undefined" ? Zotero : Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject;
@@ -481,16 +594,36 @@ If you do not know what it is, please click Cancel to deny.`);
       };
       exports.BasicTool = BasicTool2;
       var ManagerTool = class extends BasicTool2 {
+        _ensureAutoUnregisterAll() {
+          this.addListenerCallback("onPluginUnload", (params, reason) => {
+            if (params.id !== this.basicOptions.api.pluginID) {
+              return;
+            }
+            this.unregisterAll();
+          });
+        }
       };
       exports.ManagerTool = ManagerTool;
       function unregister(tools) {
         Object.values(tools).forEach((tool) => {
-          if (tool instanceof ManagerTool || typeof tool.unregisterAll === "function") {
+          if (tool instanceof ManagerTool || typeof (tool === null || tool === void 0 ? void 0 : tool.unregisterAll) === "function") {
             tool.unregisterAll();
           }
         });
       }
       exports.unregister = unregister;
+      function makeHelperTool(cls, options) {
+        return new Proxy(cls, {
+          construct(target, args) {
+            const _origin = new cls(...args);
+            if (_origin instanceof BasicTool2) {
+              _origin.updateOptions(options);
+            }
+            return _origin;
+          }
+        });
+      }
+      exports.makeHelperTool = makeHelperTool;
     }
   });
 
@@ -598,7 +731,9 @@ If you do not know what it is, please click Cancel to deny.`);
                   svg: "http://www.w3.org/2000/svg"
                 }[namespace], tagName);
               }
-              this.elementCache.push(new WeakRef(realElem));
+              if (typeof props.enableElementRecord !== "undefined" ? props.enableElementRecord : this.basicOptions.ui.enableElementRecord) {
+                this.elementCache.push(new WeakRef(realElem));
+              }
             }
             if (props.id) {
               realElem.id = props.id;
@@ -638,7 +773,7 @@ If you do not know what it is, please click Cancel to deny.`);
             }).filter((e) => e);
             elem.append(...subElements);
           }
-          if (typeof props.enableElementDOMLog !== "undefined" && props.enableElementDOMLog || this.basicOptions.ui.enableElementDOMLog) {
+          if (typeof props.enableElementDOMLog !== "undefined" ? props.enableElementDOMLog : this.basicOptions.ui.enableElementDOMLog) {
             this.log(elem);
           }
           return elem;
@@ -1093,6 +1228,7 @@ If you do not know what it is, please click Cancel to deny.`);
         }
         /**
          * Get Reader tabpanel deck element.
+         * @deprecated - use item pane api
          * @alpha
          */
         getReaderTabPanelDeck() {
@@ -1102,6 +1238,7 @@ If you do not know what it is, please click Cancel to deny.`);
         }
         /**
          * Add a reader tabpanel deck selection change observer.
+         * @deprecated - use item pane api
          * @alpha
          * @param callback
          */
@@ -1124,41 +1261,26 @@ If you do not know what it is, please click Cancel to deny.`);
           return observer;
         }
         /**
-         * Get the text selection of reader.
-         * @param currentReader Target reader
+         * Get the selected annotation data.
+         * @param reader Target reader
+         * @returns The selected annotation data.
          */
-        getSelectedText(currentReader) {
-          var _a, _b, _c;
-          if (!currentReader) {
-            return "";
-          }
-          if (this.isZotero7()) {
-            if (currentReader._internalReader._type === "pdf") {
-              const selectionRanges = (
-                // @ts-ignore
-                currentReader._internalReader._lastView._selectionRanges
-              );
-              return (
-                // @ts-ignore
-                ((_a = currentReader._internalReader._lastView._getAnnotationFromSelectionRanges(selectionRanges, "highlight")) === null || _a === void 0 ? void 0 : _a.text) || ""
-              );
-            }
-            return (
-              // @ts-ignore
-              ((_b = currentReader._internalReader._lastView._getAnnotationFromTextSelection("highlight")) === null || _b === void 0 ? void 0 : _b.text) || ""
-            );
-          } else {
-            let textArea = (_c = currentReader._iframeWindow) === null || _c === void 0 ? void 0 : _c.document.querySelectorAll("textarea");
-            if (!textArea) {
-              return "";
-            }
-            for (let i = 0; i < textArea.length; i++) {
-              if (textArea[i].style.zIndex === "-1" && textArea[i].style["width"] === "0px") {
-                return textArea[i].value.replace(/(^\s*)|(\s*$)/g, "");
-              }
-            }
-            return "";
-          }
+        getSelectedAnnotationData(reader) {
+          var _a;
+          const annotation = (
+            // @ts-ignore
+            (_a = reader === null || reader === void 0 ? void 0 : reader._internalReader._lastView._selectionPopup) === null || _a === void 0 ? void 0 : _a.annotation
+          );
+          return annotation;
+        }
+        /**
+         * Get the text selection of reader.
+         * @param reader Target reader
+         * @returns The text selection of reader.
+         */
+        getSelectedText(reader) {
+          var _a, _b;
+          return (_b = (_a = this.getSelectedAnnotationData(reader)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : "";
         }
       };
       exports.ReaderTool = ReaderTool;
@@ -1242,8 +1364,116 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/managers/patch.js
+  // node_modules/zotero-plugin-toolkit/dist/helpers/patch.js
   var require_patch = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/helpers/patch.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.PatchHelper = void 0;
+      var basic_1 = require_basic();
+      var PatchHelper = class extends basic_1.BasicTool {
+        constructor() {
+          super();
+          this.options = void 0;
+        }
+        setData(options) {
+          this.options = options;
+          const Zotero2 = this.getGlobal("Zotero");
+          const { target, funcSign, patcher } = options;
+          const origin = target[funcSign];
+          this.log("patching ", funcSign);
+          target[funcSign] = function(...args) {
+            if (options.enabled)
+              try {
+                return patcher(origin).apply(this, args);
+              } catch (e) {
+                Zotero2.logError(e);
+              }
+            return origin.apply(this, args);
+          };
+          return this;
+        }
+        enable() {
+          if (!this.options)
+            throw new Error("No patch data set");
+          this.options.enabled = true;
+          return this;
+        }
+        disable() {
+          if (!this.options)
+            throw new Error("No patch data set");
+          this.options.enabled = false;
+          return this;
+        }
+      };
+      exports.PatchHelper = PatchHelper;
+    }
+  });
+
+  // node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js
+  var require_fieldHook = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.FieldHookManager = void 0;
+      var patch_1 = require_patch();
+      var basic_1 = require_basic();
+      var FieldHookManager = class extends basic_1.ManagerTool {
+        constructor(base) {
+          super(base);
+          this.data = {
+            getField: {},
+            setField: {},
+            isFieldOfBase: {}
+          };
+          this.patchHelpers = {
+            getField: new patch_1.PatchHelper(),
+            setField: new patch_1.PatchHelper(),
+            isFieldOfBase: new patch_1.PatchHelper()
+          };
+          const _thisHelper = this;
+          for (const type of Object.keys(this.patchHelpers)) {
+            const helper = this.patchHelpers[type];
+            helper.setData({
+              target: this.getGlobal("Zotero").Item.prototype,
+              funcSign: type,
+              patcher: (original) => function(field, ...args) {
+                const originalThis = this;
+                const handler = _thisHelper.data[type][field];
+                if (typeof handler === "function") {
+                  try {
+                    return handler(field, args[0], args[1], originalThis, original);
+                  } catch (e) {
+                    return field + String(e);
+                  }
+                }
+                return original.apply(originalThis, [field, ...args]);
+              },
+              enabled: true
+            });
+          }
+        }
+        register(type, field, hook) {
+          this.data[type][field] = hook;
+        }
+        unregister(type, field) {
+          delete this.data[type][field];
+        }
+        unregisterAll() {
+          this.data.getField = {};
+          this.data.setField = {};
+          this.data.isFieldOfBase = {};
+          this.patchHelpers.getField.disable();
+          this.patchHelpers.setField.disable();
+          this.patchHelpers.isFieldOfBase.disable();
+        }
+      };
+      exports.FieldHookManager = FieldHookManager;
+    }
+  });
+
+  // node_modules/zotero-plugin-toolkit/dist/managers/patch.js
+  var require_patch2 = __commonJS({
     "node_modules/zotero-plugin-toolkit/dist/managers/patch.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
@@ -1300,120 +1530,6 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js
-  var require_fieldHook = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js"(exports) {
-      "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.FieldHookManager = void 0;
-      var basic_1 = require_basic();
-      var patch_1 = require_patch();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var FieldHookManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.patcherManager = new patch_1.PatcherManager();
-          this.localCache = [];
-          this.initializeGlobal();
-        }
-        register(type, field, hook) {
-          let hooks = this.getHooksFactory(type);
-          if (!hooks) {
-            return;
-          }
-          if (field in hooks) {
-            this.log(`[WARNING] ${type}.${field} overwrites an existing hook.`);
-          }
-          hooks[field] = hook;
-          this.localCache.push({ type, field });
-        }
-        unregister(type, field) {
-          let hooks = this.getHooksFactory(type);
-          if (hooks) {
-            delete hooks[field];
-          }
-          const idx = this.localCache.findIndex(({ type: cacheType }) => cacheType === type);
-          if (idx > -1) {
-            this.localCache.splice(idx, 1);
-          }
-        }
-        unregisterAll() {
-          [...this.localCache].forEach((cache) => {
-            this.unregister(cache.type, cache.field);
-          });
-        }
-        getHooksFactory(type) {
-          switch (type) {
-            case "getField":
-              const globalItemTree = toolkitGlobal_1.default.getInstance().itemTree;
-              const deprecatedHooks = globalItemTree.fieldHooks;
-              if (deprecatedHooks && deprecatedHooks !== this.globalCache.getFieldHooks) {
-                Object.assign(this.globalCache.getFieldHooks, deprecatedHooks);
-                globalItemTree.fieldHooks = this.globalCache.getFieldHooks;
-              }
-              return this.globalCache.getFieldHooks;
-              break;
-            case "setField":
-              return this.globalCache.setFieldHooks;
-              break;
-            case "isFieldOfBase":
-              return this.globalCache.isFieldOfBaseHooks;
-              break;
-            default:
-              break;
-          }
-        }
-        initializeGlobal() {
-          const Zotero2 = this.getGlobal("Zotero");
-          const globalCache = this.globalCache = toolkitGlobal_1.default.getInstance().fieldHooks;
-          if (!this.globalCache._ready) {
-            this.globalCache._ready = true;
-            this.patcherManager.register(Zotero2.Item.prototype, "getField", (original) => function(field, unformatted, includeBaseMapped) {
-              const originalThis = this;
-              if (Object.keys(globalCache.getFieldHooks).includes(field)) {
-                try {
-                  const hook = globalCache.getFieldHooks[field];
-                  return hook(field, unformatted, includeBaseMapped, originalThis, original.bind(originalThis));
-                } catch (e) {
-                  return field + String(e);
-                }
-              }
-              return original.apply(originalThis, arguments);
-            });
-            this.patcherManager.register(Zotero2.Item.prototype, "setField", (original) => function(field, value, loadIn) {
-              const originalThis = this;
-              if (Object.keys(globalCache.setFieldHooks).includes(field)) {
-                try {
-                  const hook = globalCache.setFieldHooks[field];
-                  return hook(field, value, loadIn, originalThis, original.bind(originalThis));
-                } catch (e) {
-                  return field + String(e);
-                }
-              }
-              return original.apply(originalThis, arguments);
-            });
-            this.patcherManager.register(Zotero2.ItemFields, "isFieldOfBase", (original) => function(field, baseField) {
-              const originalThis = this;
-              if (Object.keys(globalCache.isFieldOfBaseHooks).includes(field)) {
-                try {
-                  const hook = globalCache.isFieldOfBaseHooks[field];
-                  return hook(field, baseField, original.bind(originalThis));
-                } catch (e) {
-                  return false;
-                }
-              }
-              return original.apply(originalThis, arguments);
-            });
-          }
-        }
-      };
-      exports.FieldHookManager = FieldHookManager;
-    }
-  });
-
   // node_modules/zotero-plugin-toolkit/dist/managers/itemTree.js
   var require_itemTree = __commonJS({
     "node_modules/zotero-plugin-toolkit/dist/managers/itemTree.js"(exports) {
@@ -1426,7 +1542,7 @@ If you do not know what it is, please click Cancel to deny.`);
       var basic_1 = require_basic();
       var fieldHook_1 = require_fieldHook();
       var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var patch_1 = require_patch();
+      var patch_1 = require_patch2();
       var ItemTreeManager = class extends basic_1.ManagerTool {
         /**
          * Initialize Zotero._ItemTreeExtraColumnsGlobal if it doesn't exist.
@@ -1669,16 +1785,19 @@ If you do not know what it is, please click Cancel to deny.`);
           var _a, _b;
           await this.initializationLock.promise;
           const ZoteroPane = this.getGlobal("ZoteroPane");
-          ZoteroPane.itemsView._columnsId = null;
-          const virtualizedTable = (_a = ZoteroPane.itemsView.tree) === null || _a === void 0 ? void 0 : _a._columns;
+          const itemsView = ZoteroPane.itemsView;
+          if (!itemsView)
+            return;
+          itemsView._columnsId = null;
+          const virtualizedTable = (_a = itemsView.tree) === null || _a === void 0 ? void 0 : _a._columns;
           if (!virtualizedTable) {
             this.log("ItemTree is still loading. Refresh skipped.");
             return;
           }
           (_b = document.querySelector(`.${virtualizedTable._styleKey}`)) === null || _b === void 0 ? void 0 : _b.remove();
-          await ZoteroPane.itemsView.refreshAndMaintainSelection();
-          ZoteroPane.itemsView.tree._columns = new virtualizedTable.__proto__.constructor(ZoteroPane.itemsView.tree);
-          await ZoteroPane.itemsView.refreshAndMaintainSelection();
+          await itemsView.refreshAndMaintainSelection();
+          itemsView.tree._columns = new virtualizedTable.__proto__.constructor(itemsView.tree);
+          await itemsView.refreshAndMaintainSelection();
         }
       };
       exports.ItemTreeManager = ItemTreeManager;
@@ -1739,10 +1858,9 @@ If you do not know what it is, please click Cancel to deny.`);
                   position: "fixed",
                   left: "0",
                   top: "0",
-                  backgroundColor: "rgba(220, 220, 220, 0.4)",
+                  backgroundColor: "transparent",
                   width: "100%",
-                  height: "100%",
-                  opacity: "0.5"
+                  height: "100%"
                 },
                 listeners: [
                   {
@@ -2193,36 +2311,38 @@ If you do not know what it is, please click Cancel to deny.`);
         top: 10%;
         width: 50%;
         border-radius: var(---radius---);
-        border: 1px solid #bdbdbd;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        background-color: white;
         font-size: 18px;
         box-shadow: 0px 1.8px 7.3px rgba(0, 0, 0, 0.071),
                     0px 6.3px 24.7px rgba(0, 0, 0, 0.112),
                     0px 30px 90px rgba(0, 0, 0, 0.2);
         font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Microsoft YaHei Light", sans-serif;
+        background-color: var(--material-background) !important;
+        border: var(--material-border-quarternary) !important;
       }
       
       /* input */
       .prompt-container .input-container  {
         width: 100%;
       }
-      
+
       .input-container input {
-        width: 100%;
+        width: -moz-available;
         height: 40px;
         padding: 24px;
-        border-radius: 50%;
         border: none;
         outline: none;
         font-size: 18px;
+        margin: 0 !important;
+        border-radius: var(---radius---);
+        background-color: var(--material-background);
       }
       
       .input-container .cta {
-        border-bottom: 1px solid #f6f6f6;  
+        border-bottom: var(--material-border-quarternary);
         margin: 5px auto;
       }
       
@@ -2271,14 +2391,14 @@ If you do not know what it is, please click Cancel to deny.`);
       
       .commands-container .command .content .aux .label {
         font-size: 15px;
-        color: #5a5a5a;
+        color: var(--fill-primary);
         padding: 2px 6px;
-        background-color: #fafafa;
+        background-color: var(--color-background);
         border-radius: 5px;
       }
       
       .commands-container .selected {
-          background-color: rgba(0, 0, 0, 0.075);
+          background-color: var(--material-mix-quinary);
       }
 
       .commands-container .highlight {
@@ -2286,21 +2406,10 @@ If you do not know what it is, please click Cancel to deny.`);
       }
 
       .tip {
-        color: #5a5a5a;
+        color: var(--fill-primary);
         text-align: center;
         padding: 12px 12px;
         font-size: 18px;
-      }
-      
-      .current-value {
-        background-color: #a7b8c1;
-        color: white;
-        border-radius: 5px;
-        padding: 0 5px;
-        margin-left: 10px;
-        font-size: 14px;
-        vertical-align: middle;
-        letter-spacing: 0.05em;
       }
 
       /* instructions */
@@ -2309,10 +2418,10 @@ If you do not know what it is, please click Cancel to deny.`);
         align-content: center;
         justify-content: center;
         font-size: 15px;
-        color: rgba(0, 0, 0, 0.4);
         height: 2.5em;
         width: 100%;
-        border-top: 1px solid #f6f6f6;
+        border-top: var(--material-border-quarternary);
+        color: var(--fill-secondary);
         margin-top: 5px;
       }
       
@@ -2404,10 +2513,7 @@ If you do not know what it is, please click Cancel to deny.`);
          * @param id Command.name
          */
         unregister(id) {
-          const command = this.commands.find((c) => c.id == id);
-          this.prompt.commands = this.prompt.commands.filter((c) => {
-            return JSON.stringify(command) != JSON.stringify(c);
-          });
+          this.prompt.commands = this.prompt.commands.filter((c) => c.id != id);
           this.commands = this.commands.filter((c) => c.id != id);
         }
         /**
@@ -2415,9 +2521,7 @@ If you do not know what it is, please click Cancel to deny.`);
          */
         unregisterAll() {
           this.prompt.commands = this.prompt.commands.filter((c) => {
-            return this.commands.find((_c) => {
-              JSON.stringify(_c) != JSON.stringify(c);
-            });
+            return this.commands.every((_c) => _c.id != c.id);
           });
           this.commands = [];
         }
@@ -3944,7 +4048,9 @@ If you do not know what it is, please click Cancel to deny.`);
             const Zotero2 = basic_1.BasicTool.getZotero();
             const ZoteroPane = Zotero2.getActiveZoteroPane();
             ZoteroPane.handleKeyUp({
-              originalTarget: { id: ZoteroPane.itemsView.id },
+              originalTarget: {
+                id: ZoteroPane.itemsView ? ZoteroPane.itemsView.id : ""
+              },
               keyCode: Zotero2.isWin ? 17 : 18
             });
           }
@@ -4079,15 +4185,19 @@ If you do not know what it is, please click Cancel to deny.`);
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.ClipboardHelper = void 0;
       var basic_1 = require_basic();
-      var ClipboardHelper = class {
+      var ClipboardHelper = class extends basic_1.BasicTool {
         constructor() {
+          super();
+          this.filePath = "";
           this.transferable = Components.classes["@mozilla.org/widget/transferable;1"].createInstance(Components.interfaces.nsITransferable);
           this.clipboardService = Components.classes["@mozilla.org/widget/clipboard;1"].getService(Components.interfaces.nsIClipboard);
           this.transferable.init(null);
         }
-        addText(source, type) {
+        addText(source, type = "text/plain") {
           const str = Components.classes["@mozilla.org/supports-string;1"].createInstance(Components.interfaces.nsISupportsString);
           str.data = source;
+          if (this.isFX115() && type === "text/unicode")
+            type = "text/plain";
           this.transferable.addDataFlavor(type);
           this.transferable.setTransferData(type, str, source.length * 2);
           return this;
@@ -4097,9 +4207,8 @@ If you do not know what it is, please click Cancel to deny.`);
           if (!parts[0].includes("base64")) {
             return this;
           }
-          const basicTool2 = new basic_1.BasicTool();
           let mime = parts[0].match(/:(.*?);/)[1];
-          let bstr = basicTool2.getGlobal("window").atob(parts[1]);
+          let bstr = this.getGlobal("window").atob(parts[1]);
           let n = bstr.length;
           let u8arr = new Uint8Array(n);
           while (n--) {
@@ -4108,7 +4217,7 @@ If you do not know what it is, please click Cancel to deny.`);
           let imgTools = Components.classes["@mozilla.org/image/tools;1"].getService(Components.interfaces.imgITools);
           let mimeType;
           let img;
-          if (basicTool2.getGlobal("Zotero").platformMajorVersion >= 102) {
+          if (this.getGlobal("Zotero").platformMajorVersion >= 102) {
             img = imgTools.decodeImageFromArrayBuffer(u8arr.buffer, mime);
             mimeType = "application/x-moz-nativeimage";
           } else {
@@ -4120,8 +4229,27 @@ If you do not know what it is, please click Cancel to deny.`);
           this.transferable.setTransferData(mimeType, img, 0);
           return this;
         }
+        addFile(path) {
+          const file = Components.classes["@mozilla.org/file/local;1"].createInstance(Components.interfaces.nsIFile);
+          file.initWithPath(path);
+          this.transferable.addDataFlavor("application/x-moz-file");
+          this.transferable.setTransferData("application/x-moz-file", file);
+          this.filePath = path;
+          return this;
+        }
         copy() {
-          this.clipboardService.setData(this.transferable, null, Components.interfaces.nsIClipboard.kGlobalClipboard);
+          try {
+            this.clipboardService.setData(this.transferable, null, Components.interfaces.nsIClipboard.kGlobalClipboard);
+          } catch (e) {
+            if (this.filePath && Zotero.isMac) {
+              Zotero.Utilities.Internal.exec(`/usr/bin/osascript`, [
+                `-e`,
+                `set the clipboard to POSIX file "${this.filePath}"`
+              ]);
+            } else {
+              throw e;
+            }
+          }
           return this;
         }
       };
@@ -4136,8 +4264,9 @@ If you do not know what it is, please click Cancel to deny.`);
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.FilePickerHelper = void 0;
       var basic_1 = require_basic();
-      var FilePickerHelper = class {
+      var FilePickerHelper = class extends basic_1.BasicTool {
         constructor(title, mode, filters, suggestion, window2, filterMask) {
+          super();
           this.title = title;
           this.mode = mode;
           this.filters = filters;
@@ -4146,10 +4275,14 @@ If you do not know what it is, please click Cancel to deny.`);
           this.filterMask = filterMask;
         }
         async open() {
-          const basicTool2 = new basic_1.BasicTool();
-          const backend = basicTool2.getGlobal("require")("zotero/modules/filePicker").default;
+          let backend;
+          if (this.isFX115()) {
+            backend = ChromeUtils.importESModule("chrome://zotero/content/modules/filePicker.mjs").FilePicker;
+          } else {
+            backend = this.getGlobal("require")("zotero/modules/filePicker").default;
+          }
           const fp = new backend();
-          fp.init(this.window || basicTool2.getGlobal("window"), this.title, this.getMode(fp));
+          fp.init(this.window || this.getGlobal("window"), this.title, this.getMode(fp));
           for (const [label, ext] of this.filters || []) {
             fp.appendFilter(label, ext);
           }
@@ -4247,6 +4380,7 @@ If you do not know what it is, please click Cancel to deny.`);
             line.setProgress(options.progress);
           }
           this.lines.push(line);
+          this.updateIcons();
           return this;
         }
         /**
@@ -4260,9 +4394,12 @@ If you do not know what it is, please click Cancel to deny.`);
           }
           const idx = typeof options.idx !== "undefined" && options.idx >= 0 && options.idx < this.lines.length ? options.idx : 0;
           const icon = this.getIcon(options.type, options.icon);
+          if (icon) {
+            this.lines[idx].setItemTypeAndIcon(icon);
+          }
           options.text && this.lines[idx].setText(options.text);
-          icon && this.lines[idx].setIcon(icon);
           typeof options.progress === "number" && this.lines[idx].setProgress(options.progress);
+          this.updateIcons();
           return this;
         }
         showWithTimer(closeTime = void 0) {
@@ -4271,6 +4408,7 @@ If you do not know what it is, please click Cancel to deny.`);
           if (this.closeTime && this.closeTime > 0) {
             this.startCloseTimer(this.closeTime);
           }
+          setTimeout(this.updateIcons.bind(this), 50);
           return this;
         }
         /**
@@ -4283,6 +4421,18 @@ If you do not know what it is, please click Cancel to deny.`);
         }
         getIcon(type, defaultIcon) {
           return type && type in icons ? icons[type] : defaultIcon;
+        }
+        updateIcons() {
+          try {
+            this.lines.forEach((line) => {
+              const box = line._image;
+              const icon = box.dataset.itemType;
+              if (icon && icon.startsWith("chrome://") && !box.style.backgroundImage.includes("progress_arcs")) {
+                box.style.backgroundImage = `url(${box.dataset.itemType})`;
+              }
+            });
+          } catch (e) {
+          }
         }
       };
       exports.ProgressWindowHelper = ProgressWindowHelper;
@@ -4300,11 +4450,11 @@ If you do not know what it is, please click Cancel to deny.`);
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.VirtualizedTableHelper = void 0;
       var basic_1 = require_basic();
-      var VirtualizedTableHelper = class {
+      var VirtualizedTableHelper = class extends basic_1.BasicTool {
         constructor(win) {
+          super();
           this.window = win;
-          this.basicTool = new basic_1.BasicTool();
-          const Zotero2 = this.basicTool.getGlobal("Zotero");
+          const Zotero2 = this.getGlobal("Zotero");
           const _require = win.require;
           this.React = _require("react");
           this.ReactDOM = _require("react-dom");
@@ -4367,7 +4517,7 @@ If you do not know what it is, please click Cancel to deny.`);
             const elem = this.React.createElement(this.IntlProvider, { locale: Zotero.locale, messages: Zotero.Intl.strings }, this.React.createElement(this.VirtualizedTable, vtableProps));
             const container = this.window.document.getElementById(this.containerId);
             new Promise((resolve) => this.ReactDOM.render(elem, container, resolve)).then(() => {
-              this.basicTool.getGlobal("setTimeout")(() => {
+              this.getGlobal("setTimeout")(() => {
                 refreshSelection();
               });
             }).then(onfulfilled, onrejected);
@@ -4388,13 +4538,14 @@ If you do not know what it is, please click Cancel to deny.`);
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.DialogHelper = void 0;
       var ui_1 = require_ui();
-      var DialogHelper = class {
+      var DialogHelper = class extends ui_1.UITool {
         /**
          * Create a dialog helper with row \* column grids.
          * @param row
          * @param column
          */
         constructor(row, column) {
+          super();
           if (row <= 0 || column <= 0) {
             throw Error(`row and column must be positive integers.`);
           }
@@ -4466,7 +4617,11 @@ If you do not know what it is, please click Cancel to deny.`);
                 namespace: "html",
                 id,
                 attributes: {
-                  type: "button"
+                  type: "button",
+                  "data-l10n-id": label
+                },
+                properties: {
+                  innerHTML: label
                 },
                 listeners: [
                   {
@@ -4479,17 +4634,6 @@ If you do not know what it is, please click Cancel to deny.`);
                       if (!options.noClose) {
                         this.window.close();
                       }
-                    }
-                  }
-                ],
-                children: [
-                  {
-                    tag: "div",
-                    styles: {
-                      padding: "2.5px 15px"
-                    },
-                    properties: {
-                      innerHTML: label
                     }
                   }
                 ]
@@ -4540,21 +4684,18 @@ If you do not know what it is, please click Cancel to deny.`);
           resizable: true,
           fitContent: true
         }) {
-          this.window = openDialog(`${Zotero.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`, title, this.elementProps, this.dialogData, windowFeatures);
+          this.window = openDialog(this, `${Zotero.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`, title, this.elementProps, this.dialogData, windowFeatures);
           return this;
         }
       };
       exports.DialogHelper = DialogHelper;
-      function openDialog(targetId, title, elementProps, dialogData, windowFeatures = {
+      function openDialog(dialogHelper, targetId, title, elementProps, dialogData, windowFeatures = {
         centerscreen: true,
         resizable: true,
         fitContent: true
       }) {
-        var _a, _b;
-        const uiTool = new ui_1.UITool();
-        uiTool.basicOptions.ui.enableElementJSONLog = false;
-        uiTool.basicOptions.ui.enableElementRecord = false;
-        const Zotero2 = uiTool.getGlobal("Zotero");
+        var _a, _b, _c;
+        const Zotero2 = dialogHelper.getGlobal("Zotero");
         dialogData = dialogData || {};
         if (!dialogData.loadLock) {
           dialogData.loadLock = Zotero2.Promise.defer();
@@ -4581,18 +4722,31 @@ If you do not know what it is, please click Cancel to deny.`);
         if (windowFeatures.alwaysRaised) {
           featureString += "alwaysRaised=yes,";
         }
-        const win = uiTool.getGlobal("openDialog")("about:blank", targetId || "_blank", featureString, dialogData);
-        dialogData.loadLock.promise.then(() => {
-          win.document.head.appendChild(uiTool.createElement(win.document, "title", {
-            properties: { innerText: title }
+        const win = dialogHelper.getGlobal("openDialog")("about:blank", targetId || "_blank", featureString, dialogData);
+        (_a = dialogData.loadLock) === null || _a === void 0 ? void 0 : _a.promise.then(() => {
+          win.document.head.appendChild(dialogHelper.createElement(win.document, "title", {
+            properties: { innerText: title },
+            attributes: { "data-l10n-id": title }
           }));
-          win.document.head.appendChild(uiTool.createElement(win.document, "style", {
+          let l10nFiles = dialogData.l10nFiles || [];
+          if (typeof l10nFiles === "string") {
+            l10nFiles = [l10nFiles];
+          }
+          l10nFiles.forEach((file) => {
+            win.document.head.appendChild(dialogHelper.createElement(win.document, "link", {
+              properties: {
+                rel: "localization",
+                href: file
+              }
+            }));
+          });
+          win.document.head.appendChild(dialogHelper.createElement(win.document, "style", {
             properties: {
               innerHTML: style
             }
           }));
-          replaceElement(elementProps, uiTool);
-          win.document.body.appendChild(uiTool.createElement(win.document, "fragment", {
+          replaceElement(elementProps, dialogHelper);
+          win.document.body.appendChild(dialogHelper.createElement(win.document, "fragment", {
             children: [elementProps]
           }));
           Array.from(win.document.querySelectorAll("*[data-bind]")).forEach((elem) => {
@@ -4608,7 +4762,9 @@ If you do not know what it is, please click Cancel to deny.`);
             }
           });
           if (windowFeatures.fitContent) {
-            win.sizeToContent();
+            setTimeout(() => {
+              win.sizeToContent();
+            }, 300);
           }
           win.focus();
         }).then(() => {
@@ -4640,15 +4796,15 @@ If you do not know what it is, please click Cancel to deny.`);
           (dialogData === null || dialogData === void 0 ? void 0 : dialogData.beforeUnloadCallback) && dialogData.beforeUnloadCallback();
         });
         win.addEventListener("unload", function onWindowUnload(ev) {
-          var _a2, _b2, _c;
+          var _a2, _b2, _c2;
           if ((_a2 = this.window.arguments[0]) === null || _a2 === void 0 ? void 0 : _a2.loadLock.promise.isPending()) {
             return;
           }
-          (_c = (_b2 = this.window.arguments[0]) === null || _b2 === void 0 ? void 0 : _b2.unloadLock) === null || _c === void 0 ? void 0 : _c.resolve();
+          (_c2 = (_b2 = this.window.arguments[0]) === null || _b2 === void 0 ? void 0 : _b2.unloadLock) === null || _c2 === void 0 ? void 0 : _c2.resolve();
           this.window.removeEventListener("unload", onWindowUnload, false);
         });
         if (win.document.readyState === "complete") {
-          (_b = (_a = win.arguments[0]) === null || _a === void 0 ? void 0 : _a.loadLock) === null || _b === void 0 ? void 0 : _b.resolve();
+          (_c = (_b = win.arguments[0]) === null || _b === void 0 ? void 0 : _b.loadLock) === null || _c === void 0 ? void 0 : _c.resolve();
         }
         return win;
       }
@@ -4755,6 +4911,21 @@ If you do not know what it is, please click Cancel to deny.`);
 html,
 body {
   font-size: calc(12px * 1);
+  font-family: initial;
+}
+@media (prefers-color-scheme: light) {
+  html,
+  body {
+    background-color: #ffffff;
+    color: #000000;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html,
+  body {
+    background-color: #1e1e1e;
+    color: #ffffff;
+  }
 }
 .zotero-text-link {
   -moz-user-focus: normal;
@@ -4807,6 +4978,7 @@ body {
         }
         /**
          * Register a reader instance hook
+         * @deprecated
          * @remarks
          * initialized: called when reader instance is ready
          * @param type hook type
@@ -4879,7 +5051,7 @@ body {
       exports.ItemBoxManager = void 0;
       var basic_1 = require_basic();
       var fieldHook_1 = require_fieldHook();
-      var patch_1 = require_patch();
+      var patch_1 = require_patch2();
       var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var ItemBoxManager = class extends basic_1.ManagerTool {
         constructor(base) {
@@ -5074,7 +5246,8 @@ body {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
       exports.LargePrefHelper = void 0;
-      var LargePrefHelper = class {
+      var basic_1 = require_basic();
+      var LargePrefHelper = class extends basic_1.BasicTool {
         /**
          *
          * @param keyPref The preference name for storing the keys of the data.
@@ -5087,6 +5260,7 @@ body {
          * If `hooks` is an object, the values will be parsed by the hooks.
          */
         constructor(keyPref, valuePrefPrefix, hooks = "default") {
+          super();
           this.keyPref = keyPref;
           this.valuePrefPrefix = valuePrefPrefix;
           if (hooks === "default") {
@@ -5297,6 +5471,243 @@ body {
     }
   });
 
+  // node_modules/zotero-plugin-toolkit/dist/managers/keyboard.js
+  var require_keyboard = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/managers/keyboard.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.KeyModifier = exports.KeyboardManager = void 0;
+      var basic_1 = require_basic();
+      var wait_1 = require_wait();
+      var KeyboardManager = class extends basic_1.ManagerTool {
+        constructor(base) {
+          super(base);
+          this._keyboardCallbacks = /* @__PURE__ */ new Set();
+          this.initKeyboardListener = this._initKeyboardListener.bind(this);
+          this.unInitKeyboardListener = this._unInitKeyboardListener.bind(this);
+          this.triggerKeydown = (e) => {
+            if (!this._cachedKey) {
+              this._cachedKey = new KeyModifier(e);
+            } else {
+              this._cachedKey.merge(new KeyModifier(e), { allowOverwrite: false });
+            }
+            this.dispatchCallback(e, {
+              type: "keydown"
+            });
+          };
+          this.triggerKeyup = async (e) => {
+            if (!this._cachedKey) {
+              return;
+            }
+            const currentShortcut = new KeyModifier(this._cachedKey);
+            this._cachedKey = void 0;
+            this.dispatchCallback(e, {
+              keyboard: currentShortcut,
+              type: "keyup"
+            });
+          };
+          this.id = Zotero.Utilities.randomString();
+          this._ensureAutoUnregisterAll();
+          this.addListenerCallback("onMainWindowLoad", this.initKeyboardListener);
+          this.addListenerCallback("onMainWindowUnload", this.unInitKeyboardListener);
+          this.initReaderKeyboardListener();
+          for (const win of Zotero.getMainWindows()) {
+            this.initKeyboardListener(win);
+          }
+        }
+        /**
+         * Register a keyboard event listener.
+         * @param callback The callback function.
+         */
+        register(callback) {
+          this._keyboardCallbacks.add(callback);
+        }
+        /**
+         * Unregister a keyboard event listener.
+         * @param callback The callback function.
+         */
+        unregister(callback) {
+          this._keyboardCallbacks.delete(callback);
+        }
+        /**
+         * Unregister all keyboard event listeners.
+         */
+        unregisterAll() {
+          this._keyboardCallbacks.clear();
+          this.removeListenerCallback("onMainWindowLoad", this.initKeyboardListener);
+          this.removeListenerCallback("onMainWindowUnload", this.unInitKeyboardListener);
+          for (const win of Zotero.getMainWindows()) {
+            this.unInitKeyboardListener(win);
+          }
+        }
+        initReaderKeyboardListener() {
+          Zotero.Reader.registerEventListener("renderToolbar", (event) => this.addReaderKeyboardCallback(event), this._basicOptions.api.pluginID);
+          Zotero.Reader._readers.forEach((reader) => this.addReaderKeyboardCallback({ reader }));
+        }
+        addReaderKeyboardCallback(event) {
+          const reader = event.reader;
+          let initializedKey = `_ztoolkitKeyboard${this.id}Initialized`;
+          if (reader._iframeWindow[initializedKey]) {
+            return;
+          }
+          this._initKeyboardListener(reader._iframeWindow);
+          (0, wait_1.waitUntil)(() => {
+            var _a, _b;
+            return !Components.utils.isDeadWrapper(reader._internalReader) && ((_b = (_a = reader._internalReader) === null || _a === void 0 ? void 0 : _a._primaryView) === null || _b === void 0 ? void 0 : _b._iframeWindow);
+          }, () => {
+            var _a;
+            return this._initKeyboardListener((_a = reader._internalReader._primaryView) === null || _a === void 0 ? void 0 : _a._iframeWindow);
+          });
+          reader._iframeWindow[initializedKey] = true;
+        }
+        _initKeyboardListener(win) {
+          if (!win) {
+            return;
+          }
+          win.addEventListener("keydown", this.triggerKeydown);
+          win.addEventListener("keyup", this.triggerKeyup);
+        }
+        _unInitKeyboardListener(win) {
+          if (!win) {
+            return;
+          }
+          win.removeEventListener("keydown", this.triggerKeydown);
+          win.removeEventListener("keyup", this.triggerKeyup);
+        }
+        dispatchCallback(...args) {
+          this._keyboardCallbacks.forEach((cbk) => cbk(...args));
+        }
+      };
+      exports.KeyboardManager = KeyboardManager;
+      var KeyModifier = class {
+        constructor(raw, options) {
+          this.accel = false;
+          this.shift = false;
+          this.control = false;
+          this.meta = false;
+          this.alt = false;
+          this.key = "";
+          this.useAccel = false;
+          this.useAccel = (options === null || options === void 0 ? void 0 : options.useAccel) || false;
+          if (typeof raw === "undefined") {
+            return;
+          } else if (typeof raw === "string") {
+            raw = raw || "";
+            raw = this.unLocalized(raw);
+            this.accel = raw.includes("accel");
+            this.shift = raw.includes("shift");
+            this.control = raw.includes("control");
+            this.meta = raw.includes("meta");
+            this.alt = raw.includes("alt");
+            this.key = raw.replace(/(accel|shift|control|meta|alt| |,|-)/g, "").toLocaleLowerCase();
+          } else if (raw instanceof KeyModifier) {
+            this.merge(raw, { allowOverwrite: true });
+          } else {
+            if (options === null || options === void 0 ? void 0 : options.useAccel) {
+              if (Zotero.isMac) {
+                this.accel = raw.metaKey;
+              } else {
+                this.accel = raw.ctrlKey;
+              }
+            }
+            this.shift = raw.shiftKey;
+            this.control = raw.ctrlKey;
+            this.meta = raw.metaKey;
+            this.alt = raw.altKey;
+            if (!["Shift", "Meta", "Ctrl", "Alt", "Control"].includes(raw.key)) {
+              this.key = raw.key;
+            }
+          }
+        }
+        /**
+         * Merge another KeyModifier into this one.
+         * @param newMod the new KeyModifier
+         * @param options
+         * @returns
+         */
+        merge(newMod, options) {
+          const allowOverwrite = (options === null || options === void 0 ? void 0 : options.allowOverwrite) || false;
+          this.mergeAttribute("accel", newMod.accel, allowOverwrite);
+          this.mergeAttribute("shift", newMod.shift, allowOverwrite);
+          this.mergeAttribute("control", newMod.control, allowOverwrite);
+          this.mergeAttribute("meta", newMod.meta, allowOverwrite);
+          this.mergeAttribute("alt", newMod.alt, allowOverwrite);
+          this.mergeAttribute("key", newMod.key, allowOverwrite);
+          return this;
+        }
+        /**
+         * Check if the current KeyModifier equals to another KeyModifier.
+         * @param newMod the new KeyModifier
+         * @returns true if equals
+         */
+        equals(newMod) {
+          if (typeof newMod === "string") {
+            newMod = new KeyModifier(newMod);
+          }
+          if (this.shift !== newMod.shift || this.alt !== newMod.alt || this.key.toLowerCase() !== newMod.key.toLowerCase()) {
+            return false;
+          }
+          if (this.accel || newMod.accel) {
+            if (Zotero.isMac) {
+              if ((this.accel || this.meta) !== (newMod.accel || newMod.meta) || this.control !== newMod.control) {
+                return false;
+              }
+            } else {
+              if ((this.accel || this.control) !== (newMod.accel || newMod.control) || this.meta !== newMod.meta) {
+                return false;
+              }
+            }
+          } else {
+            if (this.control !== newMod.control || this.meta !== newMod.meta) {
+              return false;
+            }
+          }
+          return true;
+        }
+        /**
+         * Get the raw string representation of the KeyModifier.
+         */
+        getRaw() {
+          const enabled = [];
+          this.accel && enabled.push("accel");
+          this.shift && enabled.push("shift");
+          this.control && enabled.push("control");
+          this.meta && enabled.push("meta");
+          this.alt && enabled.push("alt");
+          this.key && enabled.push(this.key);
+          return enabled.join(",");
+        }
+        /**
+         * Get the localized string representation of the KeyModifier.
+         */
+        getLocalized() {
+          const raw = this.getRaw();
+          if (Zotero.isMac) {
+            return raw.replaceAll("control", "\u2303").replaceAll("alt", "\u2325").replaceAll("shift", "\u21E7").replaceAll("meta", "\u2318");
+          } else {
+            return raw.replaceAll("control", "Ctrl").replaceAll("alt", "Alt").replaceAll("shift", "Shift").replaceAll("meta", "Win");
+          }
+        }
+        /**
+         * Get the un-localized string representation of the KeyModifier.
+         */
+        unLocalized(raw) {
+          if (Zotero.isMac) {
+            return raw.replaceAll("\u2303", "control").replaceAll("\u2325", "alt").replaceAll("\u21E7", "shift").replaceAll("\u2318", "meta");
+          } else {
+            return raw.replaceAll("Ctrl", "control").replaceAll("Alt", "alt").replaceAll("Shift", "shift").replaceAll("Win", "meta");
+          }
+        }
+        mergeAttribute(attribute, value, allowOverwrite) {
+          if (allowOverwrite || !this[attribute]) {
+            this[attribute] = value;
+          }
+        }
+      };
+      exports.KeyModifier = KeyModifier;
+    }
+  });
+
   // node_modules/zotero-plugin-toolkit/dist/index.js
   var require_dist = __commonJS({
     "node_modules/zotero-plugin-toolkit/dist/index.js"(exports) {
@@ -5323,6 +5734,8 @@ body {
       var fieldHook_1 = require_fieldHook();
       var itemBox_1 = require_itemBox();
       var largePref_1 = require_largePref();
+      var keyboard_1 = require_keyboard();
+      var patch_1 = require_patch();
       var ZoteroToolkit2 = class extends basic_1.BasicTool {
         constructor() {
           super();
@@ -5332,6 +5745,7 @@ body {
           this.FieldHooks = new fieldHook_1.FieldHookManager(this);
           this.ItemTree = new itemTree_1.ItemTreeManager(this);
           this.ItemBox = new itemBox_1.ItemBoxManager(this);
+          this.Keyboard = new keyboard_1.KeyboardManager(this);
           this.Prompt = new prompt_1.PromptManager(this);
           this.LibraryTabPanel = new libraryTabPanel_1.LibraryTabPanelManager(this);
           this.ReaderTabPanel = new readerTabPanel_1.ReaderTabPanelManager(this);
@@ -5339,12 +5753,13 @@ body {
           this.Menu = new menu_1.MenuManager(this);
           this.PreferencePane = new preferencePane_1.PreferencePaneManager(this);
           this.Shortcut = new shortcut_1.ShortcutManager(this);
-          this.Clipboard = clipboard_1.ClipboardHelper;
-          this.FilePicker = filePicker_1.FilePickerHelper;
-          this.ProgressWindow = progressWindow_1.ProgressWindowHelper;
-          this.VirtualizedTable = virtualizedTable_1.VirtualizedTableHelper;
-          this.Dialog = dialog_1.DialogHelper;
-          this.LargePrefObject = largePref_1.LargePrefHelper;
+          this.Clipboard = (0, basic_1.makeHelperTool)(clipboard_1.ClipboardHelper, this);
+          this.FilePicker = (0, basic_1.makeHelperTool)(filePicker_1.FilePickerHelper, this);
+          this.Patch = (0, basic_1.makeHelperTool)(patch_1.PatchHelper, this);
+          this.ProgressWindow = (0, basic_1.makeHelperTool)(progressWindow_1.ProgressWindowHelper, this);
+          this.VirtualizedTable = (0, basic_1.makeHelperTool)(virtualizedTable_1.VirtualizedTableHelper, this);
+          this.Dialog = (0, basic_1.makeHelperTool)(dialog_1.DialogHelper, this);
+          this.LargePrefObject = (0, basic_1.makeHelperTool)(largePref_1.LargePrefHelper, this);
         }
         /**
          * Unregister everything created by managers.
@@ -6026,6 +6441,14 @@ body {
     _ztoolkit.ProgressWindow.setIconURI(
       "default",
       `chrome://${config.addonRef}/content/icons/favicon.png`
+    );
+    _ztoolkit.ProgressWindow.setIconURI(
+      "success",
+      `chrome://zotero/skin/tick@2x.png`
+    );
+    _ztoolkit.ProgressWindow.setIconURI(
+      "fail",
+      `chrome://zotero/skin/cross.png`
     );
   }
 
