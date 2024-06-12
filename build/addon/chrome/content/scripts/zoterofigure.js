@@ -6232,19 +6232,6 @@ body {
       await Zotero.PDFRenderer.renderAttachmentAnnotations(itemID);
     }
   };
-  function flattenChars(structuredText) {
-    let flatCharsArray = [];
-    for (let paragraph of structuredText.paragraphs) {
-      for (let line of paragraph.lines) {
-        for (let word of line.words) {
-          for (let charObj of word.chars) {
-            flatCharsArray.push(charObj);
-          }
-        }
-      }
-    }
-    return flatCharsArray;
-  }
   function rectsDist([ax1, ay1, ax2, ay2], [bx1, by1, bx2, by2]) {
     let left = bx2 < ax1;
     let right = ax2 < bx1;
@@ -6282,11 +6269,71 @@ body {
     }
     return idx;
   }
+  function applyTransform(p, m) {
+    const xt = p[0] * m[0] + p[1] * m[2] + m[4];
+    const yt = p[0] * m[1] + p[1] * m[3] + m[5];
+    return [xt, yt];
+  }
+  function normalizeRect(rect) {
+    const r = rect.slice(0);
+    if (rect[0] > rect[2]) {
+      r[0] = rect[2];
+      r[2] = rect[0];
+    }
+    if (rect[1] > rect[3]) {
+      r[1] = rect[3];
+      r[3] = rect[1];
+    }
+    return r;
+  }
+  function getAxialAlignedBoundingBox(r, m) {
+    const p1 = applyTransform(r, m);
+    const p2 = applyTransform(r.slice(2, 4), m);
+    const p3 = applyTransform([r[0], r[3]], m);
+    const p4 = applyTransform([r[2], r[1]], m);
+    return [
+      Math.min(p1[0], p2[0], p3[0], p4[0]),
+      Math.min(p1[1], p2[1], p3[1], p4[1]),
+      Math.max(p1[0], p2[0], p3[0], p4[0]),
+      Math.max(p1[1], p2[1], p3[1], p4[1])
+    ];
+  }
+  function getRotationTransform(rect, degrees) {
+    degrees = degrees * Math.PI / 180;
+    let cosValue = Math.cos(degrees);
+    let sinValue = Math.sin(degrees);
+    let m = [cosValue, sinValue, -sinValue, cosValue, 0, 0];
+    rect = normalizeRect(rect);
+    let x1 = rect[0] + (rect[2] - rect[0]) / 2;
+    let y1 = rect[1] + (rect[3] - rect[1]) / 2;
+    let rect2 = getAxialAlignedBoundingBox(rect, m);
+    let x2 = rect2[0] + (rect2[2] - rect2[0]) / 2;
+    let y2 = rect2[1] + (rect2[3] - rect2[1]) / 2;
+    let deltaX = x1 - x2;
+    let deltaY = y1 - y2;
+    m[4] = deltaX;
+    m[5] = deltaY;
+    return m;
+  }
   function getPositionBoundingRect(position, pageIndex) {
     if (position.rects) {
       let rects = position.rects;
       if (position.nextPageRects && position.pageIndex + 1 === pageIndex) {
         rects = position.nextPageRects;
+      }
+      if (position.rotation) {
+        let rect = rects[0];
+        let tm = getRotationTransform(rect, position.rotation);
+        let p1 = applyTransform([rect[0], rect[1]], tm);
+        let p2 = applyTransform([rect[2], rect[3]], tm);
+        let p3 = applyTransform([rect[2], rect[1]], tm);
+        let p4 = applyTransform([rect[0], rect[3]], tm);
+        return [
+          Math.min(p1[0], p2[0], p3[0], p4[0]),
+          Math.min(p1[1], p2[1], p3[1], p4[1]),
+          Math.max(p1[0], p2[0], p3[0], p4[0]),
+          Math.max(p1[1], p2[1], p3[1], p4[1])
+        ];
       }
       return [
         Math.min(...rects.map((x) => x[0])),
@@ -6311,18 +6358,17 @@ body {
       return rect;
     }
   }
-  function getFlattenedCharsByIndex(pdfPages, pageIndex) {
-    let structuredText = pdfPages[pageIndex].structuredText;
-    return flattenChars(structuredText);
+  function getTopMostRectFromPosition(position) {
+    return position?.rects?.slice().sort((a, b) => b[2] - a[2])[0];
   }
   function getSortIndex(pdfPages, position) {
     let { pageIndex } = position;
     let offset = 0;
     let top = 0;
     if (pdfPages[position.pageIndex]) {
-      let chars = getFlattenedCharsByIndex(pdfPages, position.pageIndex);
+      let { chars } = pdfPages[position.pageIndex];
       let viewBox = pdfPages[position.pageIndex].viewBox;
-      let rect = getPositionBoundingRect(position);
+      let rect = getTopMostRectFromPosition(position) || getPositionBoundingRect(position, null);
       offset = chars.length && getClosestOffset(chars, rect) || 0;
       let pageHeight = viewBox[3] - viewBox[1];
       top = pageHeight - rect[3];
