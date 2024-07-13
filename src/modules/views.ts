@@ -16,7 +16,6 @@ export default class Views {
     this.addonDir = PathUtils.join(this.zoteroDir, config.addonRef)
     this.dataDir = PathUtils.join(this.addonDir, "data")
     this.figureDir = PathUtils.join(this.addonDir, "figure")
-
     ztoolkit.UI.appendElement({
       tag: 'div',
       styles: {
@@ -113,27 +112,34 @@ export default class Views {
    * 注册所有按钮
    */
   private registerButton() {
-    const notifierID = Zotero.Notifier.registerObserver({
-      notify: async (
-        event: string,
-        type: string,
-        ids: Array<string> | number[],
-        extraData: { [key: string]: any }
-      ) => {
-        if (
-          type == "tab" &&
-          extraData[ids?.[0]]?.type == "reader"
-        ) {
-          await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
-        }
-      }
-    }, [
-      "tab",
-    ]);
-    window.setTimeout(async () => {
-      // 可能会报错，但是没关系
-      await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
-    })
+    // const notifierID = Zotero.Notifier.registerObserver({
+    //   notify: async (
+    //     event: string,
+    //     type: string,
+    //     ids: Array<string> | number[],
+    //     extraData: { [key: string]: any }
+    //   ) => {
+    //     if (
+    //       type == "tab" &&
+    //       extraData[ids?.[0]]?.type == "reader"
+    //     ) {
+    //       await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
+    //     }
+    //   }
+    // }, [
+    //   "tab",
+    // ]);
+    // window.setTimeout(async () => {
+    //   // 可能会报错，但是没关系
+    //   await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
+    // })
+    Zotero.Reader.registerEventListener(
+      "renderToolbar",
+      async () => {
+        await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
+      },
+      config.addonID
+    )
   }
 
   /**
@@ -295,7 +301,7 @@ export default class Views {
     if (reader._item.getAnnotations().find(i => i.getTags().find(t => t.tag.match(/^(Figure|Table)/)))) {
       this.button.style.filter = "none"
     }
-    this.switchToView(reader, "Annotation", false)
+    this.switchToView(reader, Zotero.Prefs.get(`${config.addonRef}.view`) as any, false)
   }
 
   private clearFilter(reader: _ZoteroTypes.ReaderInstance) {
@@ -313,6 +319,7 @@ export default class Views {
    * @param isFigure 
    */
   private switchToView(reader: _ZoteroTypes.ReaderInstance, view: "Figure" | "Annotation" | "All", isPopup = true) {
+    Zotero.Prefs.set(`${config.addonRef}.view`, view)
     let popupWin: any
     if (isPopup) {
       popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 })

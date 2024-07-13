@@ -5860,18 +5860,13 @@ body {
      * 注册所有按钮
      */
     registerButton() {
-      const notifierID = Zotero.Notifier.registerObserver({
-        notify: async (event, type, ids, extraData) => {
-          if (type == "tab" && extraData[ids?.[0]]?.type == "reader") {
-            await this.registerReaderButton(await ztoolkit.Reader.getReader());
-          }
-        }
-      }, [
-        "tab"
-      ]);
-      window.setTimeout(async () => {
-        await this.registerReaderButton(await ztoolkit.Reader.getReader());
-      });
+      Zotero.Reader.registerEventListener(
+        "renderToolbar",
+        async () => {
+          await this.registerReaderButton(await ztoolkit.Reader.getReader());
+        },
+        config.addonID
+      );
     }
     /**
      * 注册PDF阅读按钮
@@ -6024,7 +6019,7 @@ body {
       if (reader._item.getAnnotations().find((i) => i.getTags().find((t) => t.tag.match(/^(Figure|Table)/)))) {
         this.button.style.filter = "none";
       }
-      this.switchToView(reader, "Annotation", false);
+      this.switchToView(reader, Zotero.Prefs.get(`${config.addonRef}.view`), false);
     }
     clearFilter(reader) {
       const am = reader._internalReader._annotationManager;
@@ -6040,6 +6035,7 @@ body {
      * @param isFigure 
      */
     switchToView(reader, view, isPopup = true) {
+      Zotero.Prefs.set(`${config.addonRef}.view`, view);
       let popupWin;
       if (isPopup) {
         popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Switch to " + view + " view", type: "default" }).show();
@@ -6478,12 +6474,12 @@ body {
     return _ztoolkit;
   }
   function initZToolkit(_ztoolkit) {
-    const env = "development";
+    const env = "production";
     _ztoolkit.basicOptions.log.prefix = `[${config.addonName}]`;
     _ztoolkit.basicOptions.log.disableConsole = env === "production";
-    _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = true;
-    _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = true;
-    _ztoolkit.basicOptions.debug.disableDebugBridgePassword = true;
+    _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = false;
+    _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = false;
+    _ztoolkit.basicOptions.debug.disableDebugBridgePassword = false;
     _ztoolkit.ProgressWindow.setIconURI(
       "default",
       `chrome://${config.addonRef}/content/icons/favicon.png`
@@ -6503,7 +6499,7 @@ body {
     constructor() {
       this.data = {
         alive: true,
-        env: "development",
+        env: "production",
         ztoolkit: createZToolkit()
       };
       this.hooks = hooks_default;
