@@ -1,6 +1,6 @@
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-this-alias */
-/* eslint-disable @typescript-eslint/no-non-null-asserted-optional-chain */
+/* eslint-disable @typescript-eslint/no-non-null-withed-optional-chain */
 import { config } from "../../package.json";
   
 export default class Views {
@@ -29,11 +29,13 @@ export default class Views {
         event.target &&
         event.target.baseURI == "resource://zotero/reader/reader.html" &&
         event.target.tagName == "BUTTON" &&
-        event.target.className == "tag selected inactive" &&
+        event.target.classList.contains("tag") &&
         event.target.innerText.match(/(Figure|Table)/)
       )) { return }
+      event.preventDefault();
+      event.stopPropagation();
       // 当点击未被激活的图表标注的标签时候
-      const reader = Zotero.Reader.getByTabID(Zotero_Tabs._tabs[Zotero_Tabs.selectedIndex].id)
+      const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID)
       const am = reader._internalReader._annotationManager
       this.clearFilter(reader)
       if (Zotero.BetterNotes?.hooks?.onShowImageViewer) {
@@ -50,6 +52,13 @@ export default class Views {
     })
 
     addon.api.views = this
+
+    Zotero.Reader.registerEventListener("renderTextSelectionPopup", (event) => {
+      const {reader} = event
+      if (this.view == "Figure") {
+        this.switchToView(reader, "All")
+      }
+    })
   }
 
   private async addToNote(item: Zotero.Item) {
@@ -87,20 +96,6 @@ export default class Views {
     if (!reader) {
       return this.getReaderInstance(itemID, focus)
     }
-    // const closeID = window.setInterval(() => {
-    //   if (Components.utils.isDeadWrapper(reader) || Components.utils.isDeadWrapper(reader!._iframeWindow)) {
-    //     // ztoolkit.log("isDeadWrapper")
-    //     window.clearInterval(closeID)
-    //   }
-    //   // @ts-ignore
-    //   if (reader.isDone) {
-    //     if (!tab && !focus) {
-    //       Zotero_Tabs.close(reader!.tabID)
-    //     }
-    //     // reader.close()
-    //     window.clearInterval(closeID)
-    //   }
-    // }, 100)
 
     while (!(reader?._internalReader?._lastView as any)?._iframeWindow?.PDFViewerApplication?.pdfDocument) {
       await Zotero.Promise.delay(100)
@@ -112,27 +107,6 @@ export default class Views {
    * 注册所有按钮
    */
   private registerButton() {
-    // const notifierID = Zotero.Notifier.registerObserver({
-    //   notify: async (
-    //     event: string,
-    //     type: string,
-    //     ids: Array<string> | number[],
-    //     extraData: { [key: string]: any }
-    //   ) => {
-    //     if (
-    //       type == "tab" &&
-    //       extraData[ids?.[0]]?.type == "reader"
-    //     ) {
-    //       await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
-    //     }
-    //   }
-    // }, [
-    //   "tab",
-    // ]);
-    // window.setTimeout(async () => {
-    //   // 可能会报错，但是没关系
-    //   await this.registerReaderButton(await ztoolkit.Reader.getReader() as _ZoteroTypes.ReaderInstance)
-    // })
     Zotero.Reader.registerEventListener(
       "renderToolbar",
       async () => {

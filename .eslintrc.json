@@ -20,7 +20,7 @@
     "@typescript-eslint/ban-ts-comment": ["warn", "allow-with-description"],
     "@typescript-eslint/no-unused-vars": "off",
     "@typescript-eslint/no-explicit-any": ["off", { "ignoreRestArgs": true }],
-    "@typescript-eslint/no-non-null-assertion": "off"
+    "@typescript-eslint/no-non-null-withion": "off"
   },
   "ignorePatterns": [
     "**/dist/**",

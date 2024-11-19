@@ -2,8 +2,8 @@ import { execSync } from "child_process";
 import { exit } from "process";
 import { existsSync, writeFileSync, readFileSync, mkdirSync } from "fs";
 import path from "path";
-import details from "../package.json" assert { type: "json" };
-import cmd from "./zotero-cmd.json" assert { type: "json" };
+import details from "../package.json" with { type: "json" };
+import cmd from "./zotero-cmd.json" with { type: "json" };
 
 const { addonID } = details.config;
 const { zoteroBinPath, profilePath, dataDir } = cmd.exec;
@@ -68,7 +68,7 @@ if (existsSync(profilePath)) {
   throw new Error("The given Zotero profile does not exist.");
 }
 
-const startZotero = `"${zoteroBinPath}" --debugger --purgecaches -profile "${profilePath}"`;
+const startZotero = `"${zoteroBinPath}" --jsdebugger --purgecaches -profile "${profilePath}"`;
 
 execSync(startZotero);
 exit(0);

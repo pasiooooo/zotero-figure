@@ -241,32 +241,9 @@ If you do not know what it is, please click Cancel to deny.`);
       };
       exports.ToolkitGlobal = ToolkitGlobal;
       function initializeModules(instance) {
-        setModule(instance, "fieldHooks", {
-          _ready: false,
-          getFieldHooks: {},
-          setFieldHooks: {},
-          isFieldOfBaseHooks: {}
-        });
-        setModule(instance, "itemTree", {
-          _ready: false,
-          columns: [],
-          renderCellHooks: {}
-        });
-        setModule(instance, "itemBox", {
-          _ready: false,
-          fieldOptions: {}
-        });
-        setModule(instance, "shortcut", {
-          _ready: false,
-          eventKeys: []
-        });
         setModule(instance, "prompt", {
           _ready: false,
           instance: void 0
-        });
-        setModule(instance, "readerInstance", {
-          _ready: false,
-          initializedHooks: {}
         });
         debugBridge_1.DebugBridge.setModule(instance);
         pluginBridge_1.PluginBridge.setModule(instance);
@@ -286,11 +263,7 @@ If you do not know what it is, please click Cancel to deny.`);
       }
       function checkWindowDependentModules(instance) {
         instance.currentWindow = basic_1.BasicTool.getZotero().getMainWindow();
-        instance.itemTree = void 0;
-        instance.itemBox = void 0;
-        instance.shortcut = void 0;
         instance.prompt = void 0;
-        instance.readerInstance = void 0;
       }
       exports.default = ToolkitGlobal;
     }
@@ -304,7 +277,9 @@ If you do not know what it is, please click Cancel to deny.`);
         return mod && mod.__esModule ? mod : { "default": mod };
       };
       Object.defineProperty(exports, "__esModule", { value: true });
-      exports.makeHelperTool = exports.unregister = exports.ManagerTool = exports.BasicTool = void 0;
+      exports.ManagerTool = exports.BasicTool = void 0;
+      exports.unregister = unregister;
+      exports.makeHelperTool = makeHelperTool;
       var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
       var BasicTool2 = class {
         get basicOptions() {
@@ -315,7 +290,7 @@ If you do not know what it is, please click Cancel to deny.`);
          * @param basicTool Pass an BasicTool instance to copy its options.
          */
         constructor(data) {
-          this.patchSign = "zotero-plugin-toolkit@2.0.0";
+          this.patchSign = "zotero-plugin-toolkit@3.0.0";
           this._basicOptions = {
             log: {
               _type: "toolkitlog",
@@ -337,11 +312,18 @@ If you do not know what it is, please click Cancel to deny.`);
               _plugin: void 0
             }
           };
+          let { ConsoleAPI } = Components.utils.import("resource://gre/modules/Console.jsm");
+          this._console = new ConsoleAPI({
+            consoleID: `${this._basicOptions.api.pluginID}-${Date.now()}`
+          });
           this.updateOptions(data);
           return;
         }
         getGlobal(k) {
-          const _Zotero = typeof Zotero !== "undefined" ? Zotero : Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject;
+          const _Zotero = typeof Zotero !== "undefined" ? Zotero : (
+            // @ts-ignore
+            Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject
+          );
           try {
             const window2 = _Zotero.getMainWindow();
             switch (k) {
@@ -362,32 +344,6 @@ If you do not know what it is, please click Cancel to deny.`);
             }
           } catch (e) {
             Zotero.logError(e);
-          }
-        }
-        /**
-         * Check if it's running on Zotero 7 (Firefox 102)
-         */
-        isZotero7() {
-          return Zotero.platformMajorVersion >= 102;
-        }
-        isFX115() {
-          return Zotero.platformMajorVersion >= 115;
-        }
-        /**
-         * Get DOMParser.
-         *
-         * For Zotero 6: mainWindow.DOMParser or nsIDOMParser
-         *
-         * For Zotero 7: Firefox 102 support DOMParser natively
-         */
-        getDOMParser() {
-          if (this.isZotero7()) {
-            return new (this.getGlobal("DOMParser"))();
-          }
-          try {
-            return new (this.getGlobal("DOMParser"))();
-          } catch (e) {
-            return Components.classes["@mozilla.org/xmlextras/domparser;1"].createInstance(Components.interfaces.nsIDOMParser);
           }
         }
         /**
@@ -414,23 +370,18 @@ If you do not know what it is, please click Cancel to deny.`);
          * ```
          */
         createXULElement(doc, type) {
-          if (this.isZotero7()) {
-            return doc.createXULElement(type);
-          } else {
-            return doc.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", type);
-          }
+          return doc.createXULElement(type);
         }
         /**
          * Output to both Zotero.debug and console.log
          * @param data e.g. string, number, object, ...
          */
         log(...data) {
-          var _a;
+          var _a, _b;
           if (data.length === 0) {
             return;
           }
           const Zotero2 = this.getGlobal("Zotero");
-          const console = this.getGlobal("console");
           let options;
           if (((_a = data[data.length - 1]) === null || _a === void 0 ? void 0 : _a._type) === "toolkitlog") {
             options = data.pop();
@@ -442,7 +393,15 @@ If you do not know what it is, please click Cancel to deny.`);
               data.splice(0, 0, options.prefix);
             }
             if (!options.disableConsole) {
-              console.groupCollapsed(...data);
+              let console = (_b = Zotero2.getMainWindow()) === null || _b === void 0 ? void 0 : _b.console;
+              if (!console) {
+                console = this._console;
+              }
+              if (console.groupCollapsed) {
+                console.groupCollapsed(...data);
+              } else {
+                console.group(...data);
+              }
               console.trace();
               console.groupEnd();
             }
@@ -457,7 +416,6 @@ If you do not know what it is, please click Cancel to deny.`);
               }).join("\n"));
             }
           } catch (e) {
-            console.error(e);
             Zotero2.logError(e);
           }
         }
@@ -589,7 +547,10 @@ If you do not know what it is, please click Cancel to deny.`);
           return this;
         }
         static getZotero() {
-          return typeof Zotero !== "undefined" ? Zotero : Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject;
+          return typeof Zotero !== "undefined" ? Zotero : (
+            // @ts-ignore
+            Components.classes["@zotero.org/Zotero;1"].getService(Components.interfaces.nsISupports).wrappedJSObject
+          );
         }
       };
       exports.BasicTool = BasicTool2;
@@ -611,7 +572,6 @@ If you do not know what it is, please click Cancel to deny.`);
           }
         });
       }
-      exports.unregister = unregister;
       function makeHelperTool(cls, options) {
         return new Proxy(cls, {
           construct(target, args) {
@@ -623,7 +583,6 @@ If you do not know what it is, please click Cancel to deny.`);
           }
         });
       }
-      exports.makeHelperTool = makeHelperTool;
     }
   });
 
@@ -822,7 +781,7 @@ If you do not know what it is, please click Cancel to deny.`);
          * @param defaultXUL true for default XUL namespace
          */
         parseXHTMLToFragment(str, entities = [], defaultXUL = true) {
-          let parser = this.getDOMParser();
+          let parser = new DOMParser();
           const xulns = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
           const htmlns = "http://www.w3.org/1999/xhtml";
           const wrappedStr = `${entities.length ? `<!DOCTYPE bindings [ ${entities.reduce((preamble, url, index) => {
@@ -1143,7 +1102,9 @@ If you do not know what it is, please click Cancel to deny.`);
     "node_modules/zotero-plugin-toolkit/dist/utils/wait.js"(exports) {
       "use strict";
       Object.defineProperty(exports, "__esModule", { value: true });
-      exports.waitUtilAsync = exports.waitUntil = void 0;
+      exports.waitUntil = waitUntil;
+      exports.waitUtilAsync = waitUtilAsync;
+      exports.waitForReader = waitForReader;
       var basic_1 = require_basic();
       var basicTool2 = new basic_1.BasicTool();
       function waitUntil(condition, callback, interval = 100, timeout = 1e4) {
@@ -1157,7 +1118,6 @@ If you do not know what it is, please click Cancel to deny.`);
           }
         }, interval);
       }
-      exports.waitUntil = waitUntil;
       function waitUtilAsync(condition, interval = 100, timeout = 1e4) {
         return new Promise((resolve, reject) => {
           const start = Date.now();
@@ -1172,7 +1132,12 @@ If you do not know what it is, please click Cancel to deny.`);
           }, interval);
         });
       }
-      exports.waitUtilAsync = waitUtilAsync;
+      async function waitForReader(reader) {
+        await reader._initPromise;
+        await reader._lastView.initializedPromise;
+        if (reader.type == "pdf")
+          await reader._lastView._iframeWindow.PDFViewerApplication.initializedPromise;
+      }
     }
   });
 
@@ -1361,446 +1326,6 @@ If you do not know what it is, please click Cancel to deny.`);
         }
       };
       exports.ExtraFieldTool = ExtraFieldTool;
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/helpers/patch.js
-  var require_patch = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/helpers/patch.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.PatchHelper = void 0;
-      var basic_1 = require_basic();
-      var PatchHelper = class extends basic_1.BasicTool {
-        constructor() {
-          super();
-          this.options = void 0;
-        }
-        setData(options) {
-          this.options = options;
-          const Zotero2 = this.getGlobal("Zotero");
-          const { target, funcSign, patcher } = options;
-          const origin = target[funcSign];
-          this.log("patching ", funcSign);
-          target[funcSign] = function(...args) {
-            if (options.enabled)
-              try {
-                return patcher(origin).apply(this, args);
-              } catch (e) {
-                Zotero2.logError(e);
-              }
-            return origin.apply(this, args);
-          };
-          return this;
-        }
-        enable() {
-          if (!this.options)
-            throw new Error("No patch data set");
-          this.options.enabled = true;
-          return this;
-        }
-        disable() {
-          if (!this.options)
-            throw new Error("No patch data set");
-          this.options.enabled = false;
-          return this;
-        }
-      };
-      exports.PatchHelper = PatchHelper;
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js
-  var require_fieldHook = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.FieldHookManager = void 0;
-      var patch_1 = require_patch();
-      var basic_1 = require_basic();
-      var FieldHookManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.data = {
-            getField: {},
-            setField: {},
-            isFieldOfBase: {}
-          };
-          this.patchHelpers = {
-            getField: new patch_1.PatchHelper(),
-            setField: new patch_1.PatchHelper(),
-            isFieldOfBase: new patch_1.PatchHelper()
-          };
-          const _thisHelper = this;
-          for (const type of Object.keys(this.patchHelpers)) {
-            const helper = this.patchHelpers[type];
-            helper.setData({
-              target: this.getGlobal("Zotero").Item.prototype,
-              funcSign: type,
-              patcher: (original) => function(field, ...args) {
-                const originalThis = this;
-                const handler = _thisHelper.data[type][field];
-                if (typeof handler === "function") {
-                  try {
-                    return handler(field, args[0], args[1], originalThis, original);
-                  } catch (e) {
-                    return field + String(e);
-                  }
-                }
-                return original.apply(originalThis, [field, ...args]);
-              },
-              enabled: true
-            });
-          }
-        }
-        register(type, field, hook) {
-          this.data[type][field] = hook;
-        }
-        unregister(type, field) {
-          delete this.data[type][field];
-        }
-        unregisterAll() {
-          this.data.getField = {};
-          this.data.setField = {};
-          this.data.isFieldOfBase = {};
-          this.patchHelpers.getField.disable();
-          this.patchHelpers.setField.disable();
-          this.patchHelpers.isFieldOfBase.disable();
-        }
-      };
-      exports.FieldHookManager = FieldHookManager;
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/managers/patch.js
-  var require_patch2 = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/patch.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.PatcherManager = void 0;
-      var basic_1 = require_basic();
-      var PatcherManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.patcherIDMap = /* @__PURE__ */ new Map();
-        }
-        /**
-         * Patch a function
-         * @param object The owner of the function
-         * @param funcSign The signature of the function(function name)
-         * @param patcher A function that returns the new wrapper of the patched function
-         * @returns A unique ID of the patcher, which can be used to unregister the patcher
-         */
-        register(object, funcSign, patcher) {
-          const Zotero2 = this.getGlobal("Zotero");
-          const patchIDMap = this.patcherIDMap;
-          let id = Zotero2.randomString();
-          while (patchIDMap.has(id)) {
-            id = Zotero2.randomString();
-          }
-          const origin = object[funcSign];
-          patchIDMap.set(id, true);
-          this.log("patching ", funcSign);
-          object[funcSign] = function(...args) {
-            if (patchIDMap.get(id))
-              try {
-                return patcher(origin).apply(this, args);
-              } catch (e) {
-                Zotero2.logError(e);
-              }
-            return origin.apply(this, args);
-          };
-          return id;
-        }
-        /**
-         * Unregister a patcher
-         * @param patcherID The ID of the patcher to be unregistered
-         */
-        unregister(patcherID) {
-          this.patcherIDMap.delete(patcherID);
-        }
-        /**
-         * Unregister all patchers
-         */
-        unregisterAll() {
-          this.patcherIDMap.clear();
-        }
-      };
-      exports.PatcherManager = PatcherManager;
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/managers/itemTree.js
-  var require_itemTree = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/itemTree.js"(exports) {
-      "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.ItemTreeManager = void 0;
-      var basic_1 = require_basic();
-      var fieldHook_1 = require_fieldHook();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var patch_1 = require_patch2();
-      var ItemTreeManager = class extends basic_1.ManagerTool {
-        /**
-         * Initialize Zotero._ItemTreeExtraColumnsGlobal if it doesn't exist.
-         *
-         * New columns and hooks are stored there.
-         *
-         * Then patch `require("zotero/itemTree").getColumns` and `Zotero.Item.getField`
-         */
-        constructor(base) {
-          super(base);
-          this.defaultPersist = [
-            "width",
-            "ordinal",
-            "hidden",
-            "sortActive",
-            "sortDirection"
-          ];
-          this.backend = this.getGlobal("Zotero").ItemTreeManager;
-          this.localColumnCache = [];
-          this.localRenderCellCache = [];
-          this.fieldHooks = new fieldHook_1.FieldHookManager(base);
-          this.patcherManager = new patch_1.PatcherManager(base);
-          this.initializationLock = this.getGlobal("Zotero").Promise.defer();
-          if (!this.backend) {
-            this.initializeGlobal();
-          } else {
-            this.initializationLock.resolve();
-          }
-        }
-        unregisterAll() {
-          [...this.localColumnCache].forEach((key) => this.unregister(key, { skipGetField: true }));
-          [...this.localRenderCellCache].forEach(this.removeRenderCellHook.bind(this));
-          this.fieldHooks.unregisterAll();
-        }
-        /**
-         * Register a new column. Don't forget to call `unregister` on plugin exit.
-         * @param key Column dataKey
-         * @param label Column display label
-         * @param getFieldHook Called when loading cell content.
-         * If you registered the getField hook somewhere else (in ItemBox or FieldHooks), leave it undefined.
-         * @param options See zotero source code:chrome/content/zotero/itemTreeColumns.jsx
-         * @param options.renderCellHook Called when rendering cell. This will override
-         *
-         * @example
-         * ```ts
-         * const itemTree = new ItemTreeTool();
-         * await itemTree.register(
-         *   "test",
-         *   "new column",
-         *   (
-         *     field: string,
-         *     unformatted: boolean,
-         *     includeBaseMapped: boolean,
-         *     item: Zotero.Item
-         *   ) => {
-         *     return field + String(item.id);
-         *   },
-         *   {
-         *     iconPath: "chrome://zotero/skin/cross.png",
-         *   }
-         * );
-         * ```
-         */
-        async register(key, label, getFieldHook, options = {
-          showInColumnPicker: true
-        }) {
-          var _a;
-          await ((_a = this.initializationLock) === null || _a === void 0 ? void 0 : _a.promise);
-          if (!this.backend) {
-            if (this.globalCache.columns.map((_c) => _c.dataKey).includes(key)) {
-              this.log(`ItemTreeTool: ${key} is already registered.`);
-              return;
-            }
-          }
-          const column = {
-            dataKey: key,
-            label,
-            pluginID: this._basicOptions.api.pluginID,
-            iconLabel: options.iconPath ? this.createIconLabel({
-              iconPath: options.iconPath,
-              name: label
-            }) : void 0,
-            iconPath: options.iconPath,
-            htmlLabel: options.htmlLabel,
-            zoteroPersist: options.zoteroPersist || (this.backend ? this.defaultPersist : new Set(this.defaultPersist)),
-            defaultIn: options.defaultIn,
-            disabledIn: options.disabledIn,
-            enabledTreeIDs: options.enabledTreeIDs,
-            defaultSort: options.defaultSort,
-            sortReverse: options.sortReverse || options.defaultSort === -1,
-            flex: typeof options.flex === "undefined" ? 1 : options.flex,
-            width: options.width,
-            fixedWidth: options.fixedWidth,
-            staticWidth: options.staticWidth,
-            minWidth: options.minWidth,
-            ignoreInColumnPicker: options.ignoreInColumnPicker,
-            showInColumnPicker: typeof options.ignoreInColumnPicker === "undefined" ? true : options.showInColumnPicker,
-            submenu: options.submenu,
-            columnPickerSubMenu: options.columnPickerSubMenu || options.submenu,
-            dataProvider: options.dataProvider || ((item, _dataKey) => item.getField(key)),
-            renderCell: options.renderCell || options.renderCellHook
-          };
-          if (getFieldHook) {
-            this.fieldHooks.register("getField", key, getFieldHook);
-          }
-          if (this.backend) {
-            return await this.backend.registerColumns(column);
-          } else {
-            this.globalCache.columns.push(column);
-            this.localColumnCache.push(column.dataKey);
-            if (options.renderCellHook) {
-              await this.addRenderCellHook(key, options.renderCellHook);
-            }
-            await this.refresh();
-          }
-        }
-        /**
-         * Unregister an extra column. Call it on plugin exit.
-         * @param key Column dataKey, should be same as the one used in `register`
-         * @param options.skipGetField skip unregister of getField hook.
-         * This is useful when the hook is not initialized by this instance
-         */
-        async unregister(key, options = {}) {
-          await this.initializationLock.promise;
-          if (this.backend) {
-            await this.backend.unregisterColumns(key);
-            if (!options.skipGetField) {
-              this.fieldHooks.unregister("getField", key);
-            }
-            return;
-          }
-          const Zotero2 = this.getGlobal("Zotero");
-          let persisted = Zotero2.Prefs.get("pane.persist");
-          const persistedJSON = JSON.parse(persisted);
-          delete persistedJSON[key];
-          Zotero2.Prefs.set("pane.persist", JSON.stringify(persistedJSON));
-          const idx = this.globalCache.columns.map((_c) => _c.dataKey).indexOf(key);
-          if (idx >= 0) {
-            this.globalCache.columns.splice(idx, 1);
-          }
-          if (!options.skipGetField) {
-            this.fieldHooks.unregister("getField", key);
-          }
-          this.removeRenderCellHook(key);
-          await this.refresh();
-          const localKeyIdx = this.localColumnCache.indexOf(key);
-          if (localKeyIdx >= 0) {
-            this.localColumnCache.splice(localKeyIdx, 1);
-          }
-        }
-        /**
-         * Add a patch hook for `_renderCell`, which is called when cell is rendered.
-         * @deprecated
-         *
-         * This also works for Zotero's built-in cells.
-         * @remarks
-         * Don't call it manually unless you understand what you are doing.
-         * @param dataKey Cell `dataKey`, e.g. 'title'
-         * @param renderCellHook patch hook
-         */
-        async addRenderCellHook(dataKey, renderCellHook) {
-          await this.initializationLock.promise;
-          if (dataKey in this.globalCache.renderCellHooks) {
-            this.log("[WARNING] ItemTreeTool.addRenderCellHook overwrites an existing hook:", dataKey);
-          }
-          this.globalCache.renderCellHooks[dataKey] = renderCellHook;
-          this.localRenderCellCache.push(dataKey);
-        }
-        /**
-         * Remove a patch hook by `dataKey`.
-         * @deprecated
-         */
-        async removeRenderCellHook(dataKey) {
-          delete this.globalCache.renderCellHooks[dataKey];
-          const idx = this.localRenderCellCache.indexOf(dataKey);
-          if (idx >= 0) {
-            this.localRenderCellCache.splice(idx, 1);
-          }
-          await this.refresh();
-        }
-        /**
-         * Do initializations. Called in constructor to be async
-         */
-        async initializeGlobal() {
-          const Zotero2 = this.getGlobal("Zotero");
-          await Zotero2.uiReadyPromise;
-          const window2 = this.getGlobal("window");
-          this.globalCache = toolkitGlobal_1.default.getInstance().itemTree;
-          const globalCache = this.globalCache;
-          if (!globalCache._ready) {
-            globalCache._ready = true;
-            const itemTree = window2.require("zotero/itemTree");
-            if (!this.backend) {
-              this.patcherManager.register(itemTree.prototype, "getColumns", (original) => function() {
-                const columns = original.apply(this, arguments);
-                const insertAfter = columns.findIndex((column) => column.dataKey === "title");
-                columns.splice(insertAfter + 1, 0, ...globalCache.columns);
-                return columns;
-              });
-            }
-            this.patcherManager.register(itemTree.prototype, "_renderCell", (original) => function(index, data, column) {
-              if (!(column.dataKey in globalCache.renderCellHooks)) {
-                return original.apply(this, arguments);
-              }
-              const hook = globalCache.renderCellHooks[column.dataKey];
-              const elem = hook(index, data, column, original.bind(this));
-              if (elem.classList.contains("cell")) {
-                return elem;
-              }
-              const span = window2.document.createElementNS("http://www.w3.org/1999/xhtml", "span");
-              span.classList.add("cell", column.dataKey, `${column.dataKey}-item-tree-main-default`);
-              if (column.fixedWidth) {
-                span.classList.add("fixed-width");
-              }
-              span.appendChild(elem);
-              return span;
-            });
-          }
-          this.initializationLock.resolve();
-        }
-        /**
-         * Create a React Icon element
-         * @param props
-         */
-        createIconLabel(props) {
-          const _React = window.require("react");
-          return _React.createElement("span", null, _React.createElement("img", {
-            src: props.iconPath,
-            height: "10px",
-            width: "9px",
-            style: {
-              "margin-left": "6px"
-            }
-          }), " ", props.name);
-        }
-        /**
-         * Refresh itemView. You don't need to call it manually.
-         */
-        async refresh() {
-          var _a, _b;
-          await this.initializationLock.promise;
-          const ZoteroPane = this.getGlobal("ZoteroPane");
-          const itemsView = ZoteroPane.itemsView;
-          if (!itemsView)
-            return;
-          itemsView._columnsId = null;
-          const virtualizedTable = (_a = itemsView.tree) === null || _a === void 0 ? void 0 : _a._columns;
-          if (!virtualizedTable) {
-            this.log("ItemTree is still loading. Refresh skipped.");
-            return;
-          }
-          (_b = document.querySelector(`.${virtualizedTable._styleKey}`)) === null || _b === void 0 ? void 0 : _b.remove();
-          await itemsView.refreshAndMaintainSelection();
-          itemsView.tree._columns = new virtualizedTable.__proto__.constructor(itemsView.tree);
-          await itemsView.refreshAndMaintainSelection();
-        }
-      };
-      exports.ItemTreeManager = ItemTreeManager;
     }
   });
 
@@ -2530,465 +2055,6 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/managers/libraryTabPanel.js
-  var require_libraryTabPanel = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/libraryTabPanel.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.LibraryTabPanelManager = void 0;
-      var ui_1 = require_ui();
-      var basic_1 = require_basic();
-      var LibraryTabPanelManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.ui = new ui_1.UITool(this);
-          this.libraryTabCache = {
-            optionsList: []
-          };
-        }
-        /**
-         * Register a tabpanel in library.
-         * @remarks
-         * If you don't want to remove the tab & panel in runtime, `unregisterLibraryTabPanel` is not a must.
-         *
-         * The elements wiil be removed by `removeAddonElements`.
-         * @param tabLabel Label of panel tab.
-         * @param renderPanelHook Called when panel is ready. Add elements to the panel.
-         * @param options Other optional parameters.
-         * @param options.tabId ID of panel tab. Also used as unregister query. If not set, generate a random one.
-         * @param options.panelId ID of panel container (XUL.TabPanel). If not set, generate a random one.
-         * @param options.targetIndex Index of the inserted tab. Default the end of tabs.
-         * @param options.selectPanel If the panel should be selected immediately.
-         * @returns tabId. Use it for unregister.
-         * @example
-         * Register an extra library tabpanel into index 1.
-         * ```ts
-         * const libPaneManager = new LibraryTabPanelManager();
-         * const libTabId = libPaneManager.registerLibraryTabPanel(
-         *   "test",
-         *   (panel: XUL.Element, win: Window) => {
-         *     const elem = ui.creatElementsFromJSON(
-         *       win.document,
-         *       {
-         *         tag: "vbox",
-         *         namespace: "xul",
-         *         subElementOptions: [
-         *           {
-         *             tag: "h2",
-         *             directAttributes: {
-         *               innerText: "Hello World!",
-         *             },
-         *           },
-         *           {
-         *             tag: "label",
-         *             namespace: "xul",
-         *             directAttributes: {
-         *               value: "This is a library tab.",
-         *             },
-         *           },
-         *           {
-         *             tag: "button",
-         *             directAttributes: {
-         *               innerText: "Unregister",
-         *             },
-         *             listeners: [
-         *               {
-         *                 type: "click",
-         *                 listener: () => {
-         *                   ui.unregisterLibraryTabPanel(
-         *                     libTabId
-         *                   );
-         *                 },
-         *               },
-         *             ],
-         *           },
-         *         ],
-         *       }
-         *     );
-         *     panel.append(elem);
-         *   },
-         *   {
-         *     targetIndex: 1,
-         *   }
-         * );
-         * ```
-         */
-        register(tabLabel, renderPanelHook, options) {
-          options = options || {
-            tabId: void 0,
-            panelId: void 0,
-            targetIndex: -1,
-            selectPanel: false
-          };
-          const window2 = this.getGlobal("window");
-          const tabbox = window2.document.querySelector("#zotero-view-tabbox");
-          const randomId = `${Zotero.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`;
-          const tabId = options.tabId || `toolkit-readertab-${randomId}`;
-          const panelId = options.panelId || `toolkit-readertabpanel-${randomId}`;
-          const tab = this.ui.createElement(window2.document, "tab", {
-            id: tabId,
-            classList: [`toolkit-ui-tabs-${tabId}`],
-            attributes: {
-              label: tabLabel
-            },
-            ignoreIfExists: true
-          });
-          const tabpanel = this.ui.createElement(window2.document, "tabpanel", {
-            id: panelId,
-            classList: [`toolkit-ui-tabs-${tabId}`],
-            ignoreIfExists: true
-          });
-          const tabs = tabbox.querySelector("tabs");
-          const tabpanels = tabbox.querySelector("tabpanels");
-          const targetIndex = typeof options.targetIndex === "number" ? options.targetIndex : -1;
-          if (targetIndex >= 0) {
-            tabs.querySelectorAll("tab")[targetIndex].before(tab);
-            tabpanels.querySelectorAll("tabpanel")[targetIndex].before(tabpanel);
-          } else {
-            tabs.appendChild(tab);
-            tabpanels.appendChild(tabpanel);
-          }
-          if (options.selectPanel) {
-            tabbox.selectedTab = tab;
-          }
-          this.libraryTabCache.optionsList.push({
-            tabId,
-            tabLabel,
-            panelId,
-            renderPanelHook,
-            targetIndex,
-            selectPanel: options.selectPanel
-          });
-          renderPanelHook(tabpanel, window2);
-          return tabId;
-        }
-        /**
-         * Unregister the library tabpanel.
-         * @param tabId tab id
-         */
-        unregister(tabId) {
-          const idx = this.libraryTabCache.optionsList.findIndex((v) => v.tabId === tabId);
-          if (idx >= 0) {
-            this.libraryTabCache.optionsList.splice(idx, 1);
-          }
-          this.removeTabPanel(tabId);
-        }
-        /**
-         * Unregister all library tabpanel.
-         */
-        unregisterAll() {
-          const tabIds = this.libraryTabCache.optionsList.map((options) => options.tabId);
-          tabIds.forEach(this.unregister.bind(this));
-        }
-        removeTabPanel(tabId) {
-          const doc = this.getGlobal("document");
-          Array.prototype.forEach.call(doc.querySelectorAll(`.toolkit-ui-tabs-${tabId}`), (e) => {
-            e.remove();
-          });
-        }
-      };
-      exports.LibraryTabPanelManager = LibraryTabPanelManager;
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/managers/readerTabPanel.js
-  var require_readerTabPanel = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/readerTabPanel.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.ReaderTabPanelManager = void 0;
-      var ui_1 = require_ui();
-      var reader_1 = require_reader();
-      var basic_1 = require_basic();
-      var ReaderTabPanelManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.ui = new ui_1.UITool(this);
-          this.readerTool = new reader_1.ReaderTool(this);
-          this.readerTabCache = {
-            optionsList: [],
-            observer: void 0,
-            initializeLock: void 0
-          };
-        }
-        /**
-         * Register a tabpanel for every reader.
-         * @remarks
-         * Don't forget to call `unregisterReaderTabPanel` on exit.
-         * @remarks
-         * Every time a tab reader is selected/opened, the hook will be called.
-         * @param tabLabel Label of panel tab.
-         * @param renderPanelHook Called when panel is ready. Add elements to the panel.
-         *
-         * The panel might be `undefined` when opening a PDF without parent item.
-         *
-         * The owner deck is the top container of right-side bar.
-         *
-         * The readerInstance is the reader of current tabpanel.
-         * @param options Other optional parameters.
-         * @param options.tabId ID of panel tab. Also used as unregister query. If not set, generate a random one.
-         * @param options.panelId ID of panel container (XUL.TabPanel). If not set, generate a random one.
-         * @param options.targetIndex Index of the inserted tab. Default the end of tabs.
-         * @param options.selectPanel If the panel should be selected immediately.
-         * @returns tabId. Use it for unregister.
-         * @example
-         * Register an extra reader tabpanel into index 1.
-         * ```ts
-         * const readerTabId = `${config.addonRef}-extra-reader-tab`;
-         * this._Addon.toolkit.UI.registerReaderTabPanel(
-         *   "test",
-         *   (
-         *     panel: XUL.Element,
-         *     deck: XUL.Deck,
-         *     win: Window,
-         *     reader: _ZoteroReaderInstance
-         *   ) => {
-         *     if (!panel) {
-         *       this._Addon.toolkit.Tool.log(
-         *         "This reader do not have right-side bar. Adding reader tab skipped."
-         *       );
-         *       return;
-         *     }
-         *     this._Addon.toolkit.Tool.log(reader);
-         *     const elem = this._Addon.toolkit.UI.creatElementsFromJSON(
-         *       win.document,
-         *       {
-         *         tag: "vbox",
-         *         id: `${config.addonRef}-${reader._instanceID}-extra-reader-tab-div`,
-         *         namespace: "xul",
-         *         // This is important! Don't create content for multiple times
-         *         ignoreIfExists: true,
-         *         subElementOptions: [
-         *           {
-         *             tag: "h2",
-         *             directAttributes: {
-         *               innerText: "Hello World!",
-         *             },
-         *           },
-         *           {
-         *             tag: "label",
-         *             namespace: "xul",
-         *             directAttributes: {
-         *               value: "This is a reader tab.",
-         *             },
-         *           },
-         *           {
-         *             tag: "label",
-         *             namespace: "xul",
-         *             directAttributes: {
-         *               value: `Reader: ${reader._title.slice(0, 20)}`,
-         *             },
-         *           },
-         *           {
-         *             tag: "label",
-         *             namespace: "xul",
-         *             directAttributes: {
-         *               value: `itemID: ${reader.itemID}.`,
-         *             },
-         *           },
-         *           {
-         *             tag: "button",
-         *             directAttributes: {
-         *               innerText: "Unregister",
-         *             },
-         *             listeners: [
-         *               {
-         *                 type: "click",
-         *                 listener: () => {
-         *                   this._Addon.toolkit.UI.unregisterReaderTabPanel(
-         *                     readerTabId
-         *                   );
-         *                 },
-         *               },
-         *             ],
-         *           },
-         *         ],
-         *       }
-         *     );
-         *     panel.append(elem);
-         *   },
-         *   {
-         *     tabId: readerTabId,
-         *   }
-         * );
-         * ```
-         */
-        async register(tabLabel, renderPanelHook, options) {
-          var _a;
-          options = options || {
-            tabId: void 0,
-            panelId: void 0,
-            targetIndex: -1,
-            selectPanel: false
-          };
-          if (typeof this.readerTabCache.initializeLock === "undefined") {
-            await this.initializeReaderTabObserver();
-          }
-          await ((_a = this.readerTabCache.initializeLock) === null || _a === void 0 ? void 0 : _a.promise);
-          const randomId = `${Zotero.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`;
-          const tabId = options.tabId || `toolkit-readertab-${randomId}`;
-          const panelId = options.panelId || `toolkit-readertabpanel-${randomId}`;
-          const targetIndex = typeof options.targetIndex === "number" ? options.targetIndex : -1;
-          this.readerTabCache.optionsList.push({
-            tabId,
-            tabLabel,
-            panelId,
-            renderPanelHook,
-            targetIndex,
-            selectPanel: options.selectPanel
-          });
-          await this.addReaderTabPanel();
-          return tabId;
-        }
-        /**
-         * Unregister the reader tabpanel.
-         * @param tabId tab id
-         */
-        unregister(tabId) {
-          var _a;
-          const idx = this.readerTabCache.optionsList.findIndex((v) => v.tabId === tabId);
-          if (idx >= 0) {
-            this.readerTabCache.optionsList.splice(idx, 1);
-          }
-          if (this.readerTabCache.optionsList.length === 0) {
-            (_a = this.readerTabCache.observer) === null || _a === void 0 ? void 0 : _a.disconnect();
-            this.readerTabCache = {
-              optionsList: [],
-              observer: void 0,
-              initializeLock: void 0
-            };
-          }
-          this.removeTabPanel(tabId);
-        }
-        /**
-         * Unregister all library tabpanel.
-         */
-        unregisterAll() {
-          const tabIds = this.readerTabCache.optionsList.map((options) => options.tabId);
-          tabIds.forEach(this.unregister.bind(this));
-        }
-        changeTabPanel(tabId, options) {
-          const idx = this.readerTabCache.optionsList.findIndex((v) => v.tabId === tabId);
-          if (idx >= 0) {
-            Object.assign(this.readerTabCache.optionsList[idx], options);
-          }
-        }
-        removeTabPanel(tabId) {
-          const doc = this.getGlobal("document");
-          Array.prototype.forEach.call(doc.querySelectorAll(`.toolkit-ui-tabs-${tabId}`), (e) => {
-            e.remove();
-          });
-        }
-        async initializeReaderTabObserver() {
-          this.readerTabCache.initializeLock = this.getGlobal("Zotero").Promise.defer();
-          await Promise.all([
-            Zotero.initializationPromise,
-            Zotero.unlockPromise,
-            Zotero.uiReadyPromise
-          ]);
-          let lock = Zotero.Promise.defer();
-          lock.resolve();
-          const observer = await this.readerTool.addReaderTabPanelDeckObserver(async () => {
-            await lock.promise;
-            lock = Zotero.Promise.defer();
-            try {
-              this.addReaderTabPanel();
-            } catch (e) {
-            }
-            lock.resolve();
-          });
-          this.readerTabCache.observer = observer;
-          this.readerTabCache.initializeLock.resolve();
-        }
-        async addReaderTabPanel() {
-          var _a, _b;
-          const window2 = this.getGlobal("window");
-          const deck = this.readerTool.getReaderTabPanelDeck();
-          const reader = await this.readerTool.getReader();
-          if (!reader) {
-            return;
-          }
-          if (((_a = deck.selectedPanel) === null || _a === void 0 ? void 0 : _a.children[0].tagName) === "vbox") {
-            const container = deck.selectedPanel;
-            container.innerHTML = "";
-            this.ui.appendElement({
-              tag: "tabbox",
-              classList: ["zotero-view-tabbox"],
-              attributes: {
-                flex: "1"
-              },
-              enableElementRecord: false,
-              children: [
-                {
-                  tag: "tabs",
-                  classList: ["zotero-editpane-tabs"],
-                  attributes: {
-                    orient: "horizontal"
-                  },
-                  enableElementRecord: false
-                },
-                {
-                  tag: "tabpanels",
-                  classList: ["zotero-view-item"],
-                  attributes: {
-                    flex: "1"
-                  },
-                  enableElementRecord: false
-                }
-              ]
-            }, container);
-          }
-          let tabbox = (_b = deck.selectedPanel) === null || _b === void 0 ? void 0 : _b.querySelector("tabbox");
-          if (!tabbox) {
-            return;
-          }
-          const tabs = tabbox.querySelector("tabs");
-          const tabpanels = tabbox.querySelector("tabpanels");
-          this.readerTabCache.optionsList.forEach((options) => {
-            const tabId = `${options.tabId}-${reader._instanceID}`;
-            const tabClass = `toolkit-ui-tabs-${options.tabId}`;
-            if (tabs === null || tabs === void 0 ? void 0 : tabs.querySelector(`.${tabClass}`)) {
-              return;
-            }
-            const tab = this.ui.createElement(window2.document, "tab", {
-              id: tabId,
-              classList: [tabClass],
-              attributes: {
-                label: options.tabLabel
-              },
-              ignoreIfExists: true
-            });
-            const tabpanel = this.ui.createElement(window2.document, "tabpanel", {
-              id: `${options.panelId}-${reader._instanceID}`,
-              classList: [tabClass],
-              ignoreIfExists: true
-            });
-            if (options.targetIndex >= 0) {
-              tabs === null || tabs === void 0 ? void 0 : tabs.querySelectorAll("tab")[options.targetIndex].before(tab);
-              tabpanels === null || tabpanels === void 0 ? void 0 : tabpanels.querySelectorAll("tabpanel")[options.targetIndex].before(tabpanel);
-              if (tabbox.getAttribute("toolkit-select-fixed") !== "true") {
-                tabbox.tabpanels.addEventListener("select", () => {
-                  this.getGlobal("setTimeout")(() => {
-                    tabbox.tabpanels.selectedPanel = tabbox.tabs.getRelatedElement(tabbox === null || tabbox === void 0 ? void 0 : tabbox.tabs.selectedItem);
-                  }, 0);
-                });
-                tabbox.setAttribute("toolkit-select-fixed", "true");
-              }
-            } else {
-              tabs === null || tabs === void 0 ? void 0 : tabs.appendChild(tab);
-              tabpanels === null || tabpanels === void 0 ? void 0 : tabpanels.appendChild(tabpanel);
-            }
-            if (options.selectPanel) {
-              tabbox.selectedTab = tab;
-            }
-            options.renderPanelHook(tabpanel, deck, window2, reader);
-          });
-        }
-      };
-      exports.ReaderTabPanelManager = ReaderTabPanelManager;
-    }
-  });
-
   // node_modules/zotero-plugin-toolkit/dist/managers/menu.js
   var require_menu = __commonJS({
     "node_modules/zotero-plugin-toolkit/dist/managers/menu.js"(exports) {
@@ -3076,8 +2142,8 @@ If you do not know what it is, please click Cancel to deny.`);
             return false;
           }
           const doc = popup.ownerDocument;
-          const generateElementOptions = (menuitemOption) => {
-            var _a;
+          const genMenuElement = (menuitemOption) => {
+            var _a, _b;
             const elementOption = {
               tag: menuitemOption.tag,
               id: menuitemOption.id,
@@ -3085,7 +2151,7 @@ If you do not know what it is, please click Cancel to deny.`);
               attributes: {
                 label: menuitemOption.label || "",
                 hidden: Boolean(menuitemOption.hidden),
-                disaled: Boolean(menuitemOption.disabled),
+                disabled: Boolean(menuitemOption.disabled),
                 class: menuitemOption.class || "",
                 oncommand: menuitemOption.oncommand || ""
               },
@@ -3104,38 +2170,40 @@ If you do not know what it is, please click Cancel to deny.`);
               }
               elementOption.styles["list-style-image"] = `url(${menuitemOption.icon})`;
             }
-            if (menuitemOption.tag === "menu") {
-              elementOption.children.push({
-                tag: "menupopup",
-                id: menuitemOption.popupId,
-                attributes: { onpopupshowing: menuitemOption.onpopupshowing || "" },
-                children: (menuitemOption.children || menuitemOption.subElementOptions || []).map(generateElementOptions)
-              });
-            }
             if (menuitemOption.commandListener) {
               (_a = elementOption.listeners) === null || _a === void 0 ? void 0 : _a.push({
                 type: "command",
                 listener: menuitemOption.commandListener
               });
             }
-            return elementOption;
+            const menuItem = this.ui.createElement(doc, menuitemOption.tag, elementOption);
+            if (menuitemOption.getVisibility) {
+              popup === null || popup === void 0 ? void 0 : popup.addEventListener("popupshowing", (ev) => {
+                const showing = menuitemOption.getVisibility(menuItem, ev);
+                if (showing) {
+                  menuItem.removeAttribute("hidden");
+                } else {
+                  menuItem.setAttribute("hidden", "true");
+                }
+              });
+            }
+            if (menuitemOption.tag === "menu") {
+              const subPopup = this.ui.createElement(doc, "menupopup", {
+                id: menuitemOption.popupId,
+                attributes: { onpopupshowing: menuitemOption.onpopupshowing || "" }
+              });
+              (_b = menuitemOption.children) === null || _b === void 0 ? void 0 : _b.forEach((childOption) => {
+                subPopup.append(genMenuElement(childOption));
+              });
+              menuItem.append(subPopup);
+            }
+            return menuItem;
           };
-          const props = generateElementOptions(options);
-          const menuItem = this.ui.createElement(doc, options.tag, props);
+          const topMenuItem = genMenuElement(options);
           if (!anchorElement) {
             anchorElement = insertPosition === "after" ? popup.lastElementChild : popup.firstElementChild;
           }
-          anchorElement[insertPosition](menuItem);
-          if (options.getVisibility) {
-            popup.addEventListener("popupshowing", (ev) => {
-              const showing = options.getVisibility(menuItem, ev);
-              if (showing) {
-                menuItem.removeAttribute("hidden");
-              } else {
-                menuItem.setAttribute("hidden", "true");
-              }
-            });
-          }
+          anchorElement[insertPosition](topMenuItem);
         }
         unregister(menuId) {
           var _a;
@@ -3160,1024 +2228,6 @@ If you do not know what it is, please click Cancel to deny.`);
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/managers/preferencePane.js
-  var require_preferencePane = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/preferencePane.js"(exports) {
-      "use strict";
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.PreferencePaneManager = void 0;
-      var ui_1 = require_ui();
-      var basic_1 = require_basic();
-      var PreferencePaneManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.alive = true;
-          this.ui = new ui_1.UITool(this);
-          this.prefPaneCache = { win: void 0, listeners: {} };
-        }
-        /**
-         * Register a preference pane from an xhtml, for Zotero 6 & 7.
-         * @remarks
-         * Don't forget to call `unregisterPrefPane` on exit.
-         * @remarks
-         * options:
-         * ```ts
-         * export interface PrefPaneOptions {
-         *   pluginID: string;
-         *   src: string;
-         *   id?: string;
-         *   parent?: string;
-         *   label?: string;
-         *   image?: string;
-         *   extraDTD?: string[];
-         *   scripts?: string[];
-         *   defaultXUL?: boolean;
-         *   // Only for Zotero 6
-         *   onload?: (win: Window) => any;
-         * }
-         * ```
-         *
-         * @param options See {@link PrefPaneOptions}
-         * @example
-         * ```ts
-         * const prefsManager = new PreferencePaneManager();
-         * function initPrefs() {
-         *   const prefOptions = {
-         *     pluginID: addonID,
-         *     src: rootURI + "chrome/content/preferences.xhtml",
-         *     label: "Template",
-         *     image: `chrome://${addonRef}/content/icons/favicon.png`,
-         *     extraDTD: [`chrome://${addonRef}/locale/overlay.dtd`],
-         *     defaultXUL: true
-         *   };
-         *   prefsManager.register(prefOptions);
-         * };
-         *
-         * function unInitPrefs() {
-         *   prefsManager.unregisterAll();
-         * };
-         * ```
-         * // bootstrap.js:startup
-         * initPrefs();
-         *
-         * // bootstrap.js:shutdown
-         * unInitPrefs();
-         */
-        register(options) {
-          if (this.isZotero7()) {
-            this.getGlobal("Zotero").PreferencePanes.register(options);
-            return;
-          }
-          const _initImportedNodesPostInsert = (container) => {
-            var _a;
-            const _observerSymbols = /* @__PURE__ */ new Map();
-            const Zotero2 = this.getGlobal("Zotero");
-            const window2 = container.ownerGlobal;
-            let useChecked = (elem) => elem instanceof window2.HTMLInputElement && elem.type == "checkbox" || elem.tagName == "checkbox";
-            let syncFromPref = (elem, preference) => {
-              let value = Zotero2.Prefs.get(preference, true);
-              if (useChecked(elem)) {
-                elem.checked = value;
-              } else {
-                elem.value = value;
-              }
-              elem.dispatchEvent(new window2.Event("syncfrompreference"));
-            };
-            let syncToPrefOnModify = (event) => {
-              const targetNode = event.currentTarget;
-              if (targetNode === null || targetNode === void 0 ? void 0 : targetNode.getAttribute("preference")) {
-                let value = useChecked(targetNode) ? targetNode.checked : targetNode.value;
-                Zotero2.Prefs.set(targetNode.getAttribute("preference") || "", value, true);
-                targetNode.dispatchEvent(new window2.Event("synctopreference"));
-              }
-            };
-            let attachToPreference = (elem, preference) => {
-              Zotero2.debug(`Attaching <${elem.tagName}> element to ${preference}`);
-              let symbol = Zotero2.Prefs.registerObserver(preference, () => syncFromPref(elem, preference), true);
-              _observerSymbols.set(elem, symbol);
-            };
-            let detachFromPreference = (elem) => {
-              if (_observerSymbols.has(elem)) {
-                Zotero2.debug(`Detaching <${elem.tagName}> element from preference`);
-                Zotero2.Prefs.unregisterObserver(this._observerSymbols.get(elem));
-                _observerSymbols.delete(elem);
-              }
-            };
-            for (let elem of Array.from(container.querySelectorAll("[preference]"))) {
-              let preference = elem.getAttribute("preference");
-              if (container.querySelector("preferences > preference#" + preference)) {
-                this.log("<preference> is deprecated -- `preference` attribute values should be full preference keys, not <preference> IDs");
-                preference = (_a = container.querySelector("preferences > preference#" + preference)) === null || _a === void 0 ? void 0 : _a.getAttribute("name");
-              }
-              attachToPreference(elem, preference);
-              elem.addEventListener(this.isXULElement(elem) ? "command" : "input", syncToPrefOnModify);
-              window2.setTimeout(() => {
-                syncFromPref(elem, preference);
-              });
-            }
-            new window2.MutationObserver((mutations) => {
-              for (let mutation of mutations) {
-                if (mutation.type == "attributes") {
-                  let target = mutation.target;
-                  detachFromPreference(target);
-                  if (target.hasAttribute("preference")) {
-                    attachToPreference(target, target.getAttribute("preference") || "");
-                    target.addEventListener(this.isXULElement(target) ? "command" : "input", syncToPrefOnModify);
-                  }
-                } else if (mutation.type == "childList") {
-                  for (let node of Array.from(mutation.removedNodes)) {
-                    detachFromPreference(node);
-                  }
-                  for (let node of Array.from(mutation.addedNodes)) {
-                    if (node.nodeType == window2.Node.ELEMENT_NODE && node.hasAttribute("preference")) {
-                      attachToPreference(node, node.getAttribute("preference") || "");
-                      node.addEventListener(this.isXULElement(node) ? "command" : "input", syncToPrefOnModify);
-                    }
-                  }
-                }
-              }
-            }).observe(container, {
-              childList: true,
-              subtree: true,
-              attributeFilter: ["preference"]
-            });
-            for (let elem of Array.from(container.querySelectorAll("[oncommand]"))) {
-              elem.oncommand = elem.getAttribute("oncommand");
-            }
-            for (let child of Array.from(container.children)) {
-              child.dispatchEvent(new window2.Event("load"));
-            }
-          };
-          const windowListener = {
-            onOpenWindow: (xulWindow) => {
-              if (!this.alive) {
-                return;
-              }
-              const win = xulWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindow);
-              win.addEventListener("load", async () => {
-                var _a;
-                if (win.location.href === "chrome://zotero/content/preferences/preferences.xul") {
-                  this.log("registerPrefPane:detected", options);
-                  const Zotero2 = this.getGlobal("Zotero");
-                  options.id || (options.id = `plugin-${Zotero2.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`);
-                  const contentOrXHR = await Zotero2.File.getContentsAsync(options.src);
-                  const content = typeof contentOrXHR === "string" ? contentOrXHR : contentOrXHR.response;
-                  const src = `<prefpane xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" id="${options.id}" insertafter="zotero-prefpane-advanced" label="${options.label || options.pluginID}" image="${options.image || ""}">
-                ${content}
-                </prefpane>`;
-                  const frag = this.ui.parseXHTMLToFragment(src, options.extraDTD, options.defaultXUL);
-                  this.log(frag);
-                  const prefWindow = win.document.querySelector("prefwindow");
-                  prefWindow.appendChild(frag);
-                  const prefPane = win.document.querySelector(`#${options.id}`);
-                  prefWindow.addPane(prefPane);
-                  const contentBox = win.document.getAnonymousNodes(win.document.querySelector(`#${options.id}`))[0];
-                  contentBox.style.overflowY = "scroll";
-                  contentBox.style.height = "440px";
-                  win.sizeToContent();
-                  if (contentBox.scrollHeight === contentBox.clientHeight) {
-                    contentBox.style.overflowY = "hidden";
-                  }
-                  this.prefPaneCache.win = win;
-                  this.prefPaneCache.listeners[options.id] = windowListener;
-                  _initImportedNodesPostInsert(prefPane);
-                  if ((_a = options.scripts) === null || _a === void 0 ? void 0 : _a.length) {
-                    options.scripts.forEach((script) => Services.scriptloader.loadSubScript(script, win));
-                  }
-                  if (options.onload) {
-                    options.onload(win);
-                  }
-                }
-              }, false);
-            }
-          };
-          Services.wm.addListener(windowListener);
-        }
-        unregister(id) {
-          var _a;
-          const idx = Object.keys(this.prefPaneCache.listeners).indexOf(id);
-          if (idx < 0) {
-            return false;
-          }
-          const listener = this.prefPaneCache.listeners[id];
-          Services.wm.removeListener(listener);
-          listener.onOpenWindow = void 0;
-          const win = this.prefPaneCache.win;
-          if (win && !win.closed) {
-            (_a = win.document.querySelector(`#${id}`)) === null || _a === void 0 ? void 0 : _a.remove();
-          }
-          delete this.prefPaneCache.listeners[id];
-          return true;
-        }
-        /**
-         * Unregister all preference panes added with this instance
-         *
-         * Called on exiting
-         */
-        unregisterAll() {
-          this.alive = false;
-          for (const id in this.prefPaneCache.listeners) {
-            this.unregister(id);
-          }
-        }
-      };
-      exports.PreferencePaneManager = PreferencePaneManager;
-    }
-  });
-
-  // node_modules/zotero-plugin-toolkit/dist/managers/shortcut.js
-  var require_shortcut = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/shortcut.js"(exports) {
-      "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
-      Object.defineProperty(exports, "__esModule", { value: true });
-      exports.ShortcutManager = void 0;
-      var basic_1 = require_basic();
-      var ui_1 = require_ui();
-      var basic_2 = require_basic();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var ShortcutManager = class extends basic_2.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.ui = new ui_1.UITool(this);
-          this.creatorId = `${Zotero.Utilities.randomString()}-${(/* @__PURE__ */ new Date()).getTime()}`;
-          this.initializeGlobal();
-        }
-        register(type, keyOptions) {
-          const _keyOptions = keyOptions;
-          _keyOptions.type = type;
-          switch (_keyOptions.type) {
-            case "event":
-              this.registerEventKey(_keyOptions);
-              return true;
-            case "element":
-              this.registerElementKey(_keyOptions);
-              return true;
-            case "prefs":
-              this.getGlobal("Zotero").Prefs.set(_keyOptions.id, _keyOptions.key || "");
-              return true;
-            default:
-              try {
-                if (_keyOptions.register) {
-                  return _keyOptions.register(_keyOptions);
-                } else {
-                  return false;
-                }
-              } catch (e) {
-                this.log(e);
-                return false;
-              }
-          }
-        }
-        /**
-         * Get all shortcuts(element, event, prefs, builtin)
-         */
-        getAll() {
-          return Array.prototype.concat(this.getMainWindowElementKeys(), this.getEventKeys(), this.getPrefsKeys(), this.getBuiltinKeys());
-        }
-        /**
-         * Check key conflicting of `inputKeyOptions`.
-         * @param inputKeyOptions
-         * @param options
-         * @returns conflicting keys array
-         */
-        checkKeyConflicting(inputKeyOptions, options = { includeEmpty: false, customKeys: [] }) {
-          var _a;
-          inputKeyOptions.modifiers = new KeyModifier(inputKeyOptions.modifiers || "").getRaw();
-          let allKeys = this.getAll();
-          if ((_a = options.customKeys) === null || _a === void 0 ? void 0 : _a.length) {
-            allKeys = allKeys.concat(options.customKeys);
-          }
-          if (!options.includeEmpty) {
-            allKeys = allKeys.filter((_keyOptions) => _keyOptions.key);
-          }
-          return allKeys.filter((_keyOptions) => {
-            var _a2, _b;
-            return _keyOptions.id !== inputKeyOptions.id && ((_a2 = _keyOptions.key) === null || _a2 === void 0 ? void 0 : _a2.toLowerCase()) === ((_b = inputKeyOptions.key) === null || _b === void 0 ? void 0 : _b.toLowerCase()) && _keyOptions.modifiers === inputKeyOptions.modifiers;
-          });
-        }
-        /**
-         * Find all key conflicting.
-         * @param options
-         * @returns An array of conflicting keys arrays. Same conflicting keys are put together.
-         */
-        checkAllKeyConflicting(options = { includeEmpty: false, customKeys: [] }) {
-          var _a;
-          let allKeys = this.getAll();
-          if ((_a = options.customKeys) === null || _a === void 0 ? void 0 : _a.length) {
-            allKeys = allKeys.concat(options.customKeys);
-          }
-          if (!options.includeEmpty) {
-            allKeys = allKeys.filter((_keyOptions) => _keyOptions.key);
-          }
-          const conflicting = [];
-          while (allKeys.length > 0) {
-            const checkKey = allKeys.pop();
-            const conflictKeys = allKeys.filter((_keyOptions) => {
-              var _a2, _b;
-              return ((_a2 = _keyOptions.key) === null || _a2 === void 0 ? void 0 : _a2.toLowerCase()) === ((_b = checkKey.key) === null || _b === void 0 ? void 0 : _b.toLowerCase()) && _keyOptions.modifiers === checkKey.modifiers;
-            });
-            if (conflictKeys.length) {
-              conflictKeys.push(checkKey);
-              conflicting.push(conflictKeys);
-              const conflictingKeyIds = conflictKeys.map((key) => key.id);
-              const toRemoveIds = [];
-              allKeys.forEach((key, i) => conflictingKeyIds.includes(key.id) && toRemoveIds.push(i));
-              toRemoveIds.sort((a, b) => b - a).forEach((id) => allKeys.splice(id, 1));
-            }
-          }
-          return conflicting;
-        }
-        /**
-         * Unregister a key.
-         * @remarks
-         * `builtin` keys cannot be unregistered.
-         * @param keyOptions
-         * @returns `true` for success and `false` for failure.
-         */
-        async unregister(keyOptions) {
-          var _a;
-          switch (keyOptions.type) {
-            case "element":
-              (_a = (keyOptions.xulData.document || this.getGlobal("document")).querySelector(`#${keyOptions.id}`)) === null || _a === void 0 ? void 0 : _a.remove();
-              return true;
-            case "prefs":
-              this.getGlobal("Zotero").Prefs.set(keyOptions.id, "");
-              return true;
-            case "builtin":
-              return false;
-            case "event":
-              let idx = this.globalCache.eventKeys.findIndex((currentKey) => currentKey.id === keyOptions.id);
-              while (idx >= 0) {
-                this.globalCache.eventKeys.splice(idx, 1);
-                idx = this.globalCache.eventKeys.findIndex((currentKey) => currentKey.id === keyOptions.id);
-              }
-              return true;
-            default:
-              try {
-                if (keyOptions.unregister) {
-                  return await keyOptions.unregister(keyOptions);
-                } else {
-                  return false;
-                }
-              } catch (e) {
-                this.log(e);
-                return false;
-              }
-          }
-        }
-        /**
-         * Unregister all keys created by this instance.
-         */
-        unregisterAll() {
-          this.ui.unregisterAll();
-          this.globalCache.eventKeys.filter((keyOptions) => keyOptions.creatorId === this.creatorId).forEach((keyOptions) => this.unregister(keyOptions));
-        }
-        initializeGlobal() {
-          const Zotero2 = this.getGlobal("Zotero");
-          const window2 = this.getGlobal("window");
-          this.globalCache = toolkitGlobal_1.default.getInstance().shortcut;
-          if (!this.globalCache._ready) {
-            this.globalCache._ready = true;
-            window2.addEventListener("keypress", (event) => {
-              let eventMods = [];
-              let eventModsWithAccel = [];
-              if (event.altKey) {
-                eventMods.push("alt");
-                eventModsWithAccel.push("alt");
-              }
-              if (event.shiftKey) {
-                eventMods.push("shift");
-                eventModsWithAccel.push("shift");
-              }
-              if (event.metaKey) {
-                eventMods.push("meta");
-                Zotero2.isMac && eventModsWithAccel.push("accel");
-              }
-              if (event.ctrlKey) {
-                eventMods.push("control");
-                !Zotero2.isMac && eventModsWithAccel.push("accel");
-              }
-              const eventModStr = new KeyModifier(eventMods.join(",")).getRaw();
-              const eventModStrWithAccel = new KeyModifier(eventMods.join(",")).getRaw();
-              this.globalCache.eventKeys.forEach((keyOptions) => {
-                var _a;
-                if (keyOptions.disabled) {
-                  return;
-                }
-                const modStr = new KeyModifier(keyOptions.modifiers || "").getRaw();
-                if ((modStr === eventModStr || modStr === eventModStrWithAccel) && ((_a = keyOptions.key) === null || _a === void 0 ? void 0 : _a.toLowerCase()) === event.key.toLowerCase()) {
-                  keyOptions.callback();
-                }
-              });
-            });
-          }
-        }
-        registerEventKey(keyOptions) {
-          keyOptions.creatorId = this.creatorId;
-          this.globalCache.eventKeys.push(keyOptions);
-        }
-        /**
-         * Register Element \<commandset\>. In general, use `registerElementKey` or `registerKey`.
-         * @param commandSetOptions
-         */
-        registerElementCommandset(commandSetOptions) {
-          var _a;
-          (_a = commandSetOptions.document.querySelector("window")) === null || _a === void 0 ? void 0 : _a.appendChild(this.ui.createElement(commandSetOptions.document, "commandset", {
-            id: commandSetOptions.id,
-            skipIfExists: true,
-            children: commandSetOptions.commands.map((cmd) => ({
-              tag: "command",
-              id: cmd.id,
-              attributes: {
-                oncommand: cmd.oncommand,
-                disabled: cmd.disabled,
-                label: cmd.label
-              }
-            }))
-          }));
-        }
-        /**
-         * Register Element \<command\>. In general, use `registerElementKey` or `registerKey`.
-         * @param commandOptions
-         */
-        registerElementCommand(commandOptions) {
-          var _a;
-          if (commandOptions._parentId) {
-            this.registerElementCommandset({
-              id: commandOptions._parentId,
-              document: commandOptions.document,
-              commands: []
-            });
-          }
-          (_a = commandOptions.document.querySelector(`commandset#${commandOptions._parentId}`)) === null || _a === void 0 ? void 0 : _a.appendChild(this.ui.createElement(commandOptions.document, "command", {
-            id: commandOptions.id,
-            skipIfExists: true,
-            attributes: {
-              oncommand: commandOptions.oncommand,
-              disabled: commandOptions.disabled,
-              label: commandOptions.label
-            }
-          }));
-        }
-        /**
-         * Register Element \<keyset\>. In general, use `registerElementKey` or `registerKey`.
-         * @param keySetOptions
-         */
-        registerElementKeyset(keySetOptions) {
-          var _a;
-          (_a = keySetOptions.document.querySelector("window")) === null || _a === void 0 ? void 0 : _a.appendChild(this.ui.createElement(keySetOptions.document, "keyset", {
-            id: keySetOptions.id,
-            skipIfExists: true,
-            children: keySetOptions.keys.map((keyOptions) => ({
-              tag: "key",
-              id: keyOptions.id,
-              attributes: {
-                oncommand: keyOptions.xulData.oncommand || "//",
-                command: keyOptions.xulData.command,
-                modifiers: keyOptions.modifiers,
-                key: this.getXULKey(keyOptions.key),
-                keycode: this.getXULKeyCode(keyOptions.key),
-                disabled: keyOptions.disabled
-              }
-            }))
-          }));
-        }
-        /**
-         * Register a shortcut key element \<key\>.
-         * @remarks
-         * Provide `_parentId` to register a \<keyset\>;
-         *
-         * Provide `_commandOptions` to register a \<command\>;
-         *
-         * Provide `_parentId` in `_commandOptions` to register a \<commandset\>.
-         *
-         * See examples for more details.
-         * @param keyOptions
-         * @example
-         */
-        registerElementKey(keyOptions) {
-          var _a;
-          const doc = keyOptions.xulData.document || this.getGlobal("document");
-          if (keyOptions.xulData._parentId) {
-            this.registerElementKeyset({
-              id: keyOptions.xulData._parentId,
-              document: doc,
-              keys: []
-            });
-          }
-          (_a = doc.querySelector(`keyset#${keyOptions.xulData._parentId}`)) === null || _a === void 0 ? void 0 : _a.appendChild(this.ui.createElement(doc, "key", {
-            id: keyOptions.id,
-            skipIfExists: true,
-            attributes: {
-              oncommand: keyOptions.xulData.oncommand || "//",
-              command: keyOptions.xulData.command,
-              modifiers: keyOptions.modifiers,
-              key: this.getXULKey(keyOptions.key),
-              keycode: this.getXULKeyCode(keyOptions.key),
-              disabled: keyOptions.disabled
-            }
-          }));
-          if (keyOptions.xulData._commandOptions) {
-            this.registerElementCommand(keyOptions.xulData._commandOptions);
-          }
-        }
-        getXULKey(standardKey) {
-          if (standardKey.length === 1) {
-            return standardKey;
-          }
-          return void 0;
-        }
-        getXULKeyCode(standardKey) {
-          const idx = Object.values(XUL_KEYCODE_MAPS).findIndex((value) => value === standardKey);
-          if (idx >= 0) {
-            return Object.values(XUL_KEYCODE_MAPS)[idx];
-          }
-          return void 0;
-        }
-        getStandardKey(XULKey, XULKeyCode) {
-          if (XULKeyCode && Object.keys(XUL_KEYCODE_MAPS).includes(XULKeyCode)) {
-            return XUL_KEYCODE_MAPS[XULKeyCode];
-          } else {
-            return XULKey;
-          }
-        }
-        /**
-         * Get all \<commandset\> details.
-         * @param doc
-         */
-        getElementCommandSets(doc) {
-          return Array.from((doc || this.getGlobal("document")).querySelectorAll("commandset")).map((cmdSet) => ({
-            id: cmdSet.id,
-            commands: Array.from(cmdSet.querySelectorAll("command")).map((cmd) => ({
-              id: cmd.id,
-              oncommand: cmd.getAttribute("oncommand"),
-              disabled: cmd.getAttribute("disabled") === "true",
-              label: cmd.getAttribute("label"),
-              _parentId: cmdSet.id
-            }))
-          }));
-        }
-        /**
-         * Get all \<command\> details.
-         * @param doc
-         */
-        getElementCommands(doc) {
-          return Array.prototype.concat(...this.getElementCommandSets(doc).map((cmdSet) => cmdSet.commands));
-        }
-        /**
-         * Get all \<keyset\> details.
-         * @param doc
-         * @param options
-         */
-        getElementKeySets(doc) {
-          let allCommends = this.getElementCommands(doc);
-          return Array.from((doc || this.getGlobal("document")).querySelectorAll("keyset")).map((keysetElem) => ({
-            id: keysetElem.id,
-            document: doc,
-            keys: Array.from(keysetElem.querySelectorAll("key")).map((keyElem) => {
-              const oncommand = keyElem.getAttribute("oncommand") || "";
-              const commandId = keyElem.getAttribute("command") || "";
-              const commandOptions = allCommends.find((cmd) => cmd.id === commandId);
-              const key = {
-                type: "element",
-                id: keyElem.id,
-                key: this.getStandardKey(keyElem.getAttribute("key") || "", keyElem.getAttribute("keycode") || ""),
-                modifiers: new KeyModifier(keyElem.getAttribute("modifiers") || "").getRaw(),
-                disabled: keyElem.getAttribute("disabled") === "true",
-                xulData: {
-                  document: doc,
-                  oncommand,
-                  command: commandId,
-                  _parentId: keysetElem.id,
-                  _commandOptions: commandOptions
-                },
-                callback: () => {
-                  const win = doc.ownerGlobal;
-                  const _eval = win.eval;
-                  _eval(oncommand);
-                  _eval((commandOptions === null || commandOptions === void 0 ? void 0 : commandOptions.oncommand) || "");
-                }
-              };
-              return key;
-            })
-          }));
-        }
-        /**
-         * Get all \<key\> details.
-         * @param doc
-         * @param options
-         */
-        getElementKeys(doc) {
-          return Array.prototype.concat(...this.getElementKeySets(doc).map((keyset) => keyset.keys)).filter((elemKey) => !ELEM_KEY_IGNORE.includes(elemKey.id));
-        }
-        /**
-         * Get \<key\> details in main window.
-         * @param options
-         */
-        getMainWindowElementKeys() {
-          return this.getElementKeys(this.getGlobal("document"));
-        }
-        getEventKeys() {
-          return this.globalCache.eventKeys;
-        }
-        /**
-         * Get Zotero builtin keys defined in preferences.
-         */
-        getPrefsKeys() {
-          const Zotero2 = this.getGlobal("Zotero");
-          return PREF_KEYS.map((pref) => ({
-            id: pref.id,
-            modifiers: pref.modifiers,
-            key: Zotero2.Prefs.get(pref.id),
-            callback: pref.callback,
-            type: "prefs"
-          }));
-        }
-        /**
-         * Get Zotero builtin keys not defined in preferences.
-         */
-        getBuiltinKeys() {
-          return BUILTIN_KEYS.map((builtin) => ({
-            id: builtin.id,
-            modifiers: builtin.modifiers,
-            key: builtin.key,
-            callback: builtin.callback,
-            type: "builtin"
-          }));
-        }
-      };
-      exports.ShortcutManager = ShortcutManager;
-      var KeyModifier = class {
-        constructor(raw) {
-          raw = raw || "";
-          this.accel = raw.includes("accel");
-          this.shift = raw.includes("shift");
-          this.control = raw.includes("control");
-          this.meta = raw.includes("meta");
-          this.alt = raw.includes("alt");
-        }
-        equals(newMod) {
-          this.accel === newMod.accel;
-          this.shift === newMod.shift;
-          this.control === newMod.control;
-          this.meta === newMod.meta;
-          this.alt === newMod.alt;
-        }
-        getRaw() {
-          const enabled = [];
-          this.accel && enabled.push("accel");
-          this.shift && enabled.push("shift");
-          this.control && enabled.push("control");
-          this.meta && enabled.push("meta");
-          this.alt && enabled.push("alt");
-          return enabled.join(",");
-        }
-      };
-      var XUL_KEYCODE_MAPS;
-      (function(XUL_KEYCODE_MAPS2) {
-        XUL_KEYCODE_MAPS2["VK_CANCEL"] = "Unidentified";
-        XUL_KEYCODE_MAPS2["VK_BACK"] = "Backspace";
-        XUL_KEYCODE_MAPS2["VK_TAB"] = "Tab";
-        XUL_KEYCODE_MAPS2["VK_CLEAR"] = "Clear";
-        XUL_KEYCODE_MAPS2["VK_RETURN"] = "Enter";
-        XUL_KEYCODE_MAPS2["VK_ENTER"] = "Enter";
-        XUL_KEYCODE_MAPS2["VK_SHIFT"] = "Shift";
-        XUL_KEYCODE_MAPS2["VK_CONTROL"] = "Control";
-        XUL_KEYCODE_MAPS2["VK_ALT"] = "Alt";
-        XUL_KEYCODE_MAPS2["VK_PAUSE"] = "Pause";
-        XUL_KEYCODE_MAPS2["VK_CAPS_LOCK"] = "CapsLock";
-        XUL_KEYCODE_MAPS2["VK_ESCAPE"] = "Escape";
-        XUL_KEYCODE_MAPS2["VK_SPACE"] = " ";
-        XUL_KEYCODE_MAPS2["VK_PAGE_UP"] = "PageUp";
-        XUL_KEYCODE_MAPS2["VK_PAGE_DOWN"] = "PageDown";
-        XUL_KEYCODE_MAPS2["VK_END"] = "End";
-        XUL_KEYCODE_MAPS2["VK_HOME"] = "Home";
-        XUL_KEYCODE_MAPS2["VK_LEFT"] = "ArrowLeft";
-        XUL_KEYCODE_MAPS2["VK_UP"] = "ArrowUp";
-        XUL_KEYCODE_MAPS2["VK_RIGHT"] = "ArrowRight";
-        XUL_KEYCODE_MAPS2["VK_DOWN"] = "ArrowDown";
-        XUL_KEYCODE_MAPS2["VK_PRINTSCREEN"] = "PrintScreen";
-        XUL_KEYCODE_MAPS2["VK_INSERT"] = "Insert";
-        XUL_KEYCODE_MAPS2["VK_DELETE"] = "Backspace";
-        XUL_KEYCODE_MAPS2["VK_0"] = "0";
-        XUL_KEYCODE_MAPS2["VK_1"] = "1";
-        XUL_KEYCODE_MAPS2["VK_2"] = "2";
-        XUL_KEYCODE_MAPS2["VK_3"] = "3";
-        XUL_KEYCODE_MAPS2["VK_4"] = "4";
-        XUL_KEYCODE_MAPS2["VK_5"] = "5";
-        XUL_KEYCODE_MAPS2["VK_6"] = "6";
-        XUL_KEYCODE_MAPS2["VK_7"] = "7";
-        XUL_KEYCODE_MAPS2["VK_8"] = "8";
-        XUL_KEYCODE_MAPS2["VK_9"] = "9";
-        XUL_KEYCODE_MAPS2["VK_A"] = "A";
-        XUL_KEYCODE_MAPS2["VK_B"] = "B";
-        XUL_KEYCODE_MAPS2["VK_C"] = "C";
-        XUL_KEYCODE_MAPS2["VK_D"] = "D";
-        XUL_KEYCODE_MAPS2["VK_E"] = "E";
-        XUL_KEYCODE_MAPS2["VK_F"] = "F";
-        XUL_KEYCODE_MAPS2["VK_G"] = "G";
-        XUL_KEYCODE_MAPS2["VK_H"] = "H";
-        XUL_KEYCODE_MAPS2["VK_I"] = "I";
-        XUL_KEYCODE_MAPS2["VK_J"] = "J";
-        XUL_KEYCODE_MAPS2["VK_K"] = "K";
-        XUL_KEYCODE_MAPS2["VK_L"] = "L";
-        XUL_KEYCODE_MAPS2["VK_M"] = "M";
-        XUL_KEYCODE_MAPS2["VK_N"] = "N";
-        XUL_KEYCODE_MAPS2["VK_O"] = "O";
-        XUL_KEYCODE_MAPS2["VK_P"] = "P";
-        XUL_KEYCODE_MAPS2["VK_Q"] = "Q";
-        XUL_KEYCODE_MAPS2["VK_R"] = "R";
-        XUL_KEYCODE_MAPS2["VK_S"] = "S";
-        XUL_KEYCODE_MAPS2["VK_T"] = "T";
-        XUL_KEYCODE_MAPS2["VK_U"] = "U";
-        XUL_KEYCODE_MAPS2["VK_V"] = "V";
-        XUL_KEYCODE_MAPS2["VK_W"] = "W";
-        XUL_KEYCODE_MAPS2["VK_X"] = "X";
-        XUL_KEYCODE_MAPS2["VK_Y"] = "Y";
-        XUL_KEYCODE_MAPS2["VK_Z"] = "Z";
-        XUL_KEYCODE_MAPS2["VK_SEMICOLON"] = "Unidentified";
-        XUL_KEYCODE_MAPS2["VK_EQUALS"] = "Unidentified";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD0"] = "0";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD1"] = "1";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD2"] = "2";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD3"] = "3";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD4"] = "4";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD5"] = "5";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD6"] = "6";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD7"] = "7";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD8"] = "8";
-        XUL_KEYCODE_MAPS2["VK_NUMPAD9"] = "9";
-        XUL_KEYCODE_MAPS2["VK_MULTIPLY"] = "Multiply";
-        XUL_KEYCODE_MAPS2["VK_ADD"] = "Add";
-        XUL_KEYCODE_MAPS2["VK_SEPARATOR"] = "Separator";
-        XUL_KEYCODE_MAPS2["VK_SUBTRACT"] = "Subtract";
-        XUL_KEYCODE_MAPS2["VK_DECIMAL"] = "Decimal";
-        XUL_KEYCODE_MAPS2["VK_DIVIDE"] = "Divide";
-        XUL_KEYCODE_MAPS2["VK_F1"] = "F1";
-        XUL_KEYCODE_MAPS2["VK_F2"] = "F2";
-        XUL_KEYCODE_MAPS2["VK_F3"] = "F3";
-        XUL_KEYCODE_MAPS2["VK_F4"] = "F4";
-        XUL_KEYCODE_MAPS2["VK_F5"] = "F5";
-        XUL_KEYCODE_MAPS2["VK_F6"] = "F6";
-        XUL_KEYCODE_MAPS2["VK_F7"] = "F7";
-        XUL_KEYCODE_MAPS2["VK_F8"] = "F8";
-        XUL_KEYCODE_MAPS2["VK_F9"] = "F9";
-        XUL_KEYCODE_MAPS2["VK_F10"] = "F10";
-        XUL_KEYCODE_MAPS2["VK_F11"] = "F11";
-        XUL_KEYCODE_MAPS2["VK_F12"] = "F12";
-        XUL_KEYCODE_MAPS2["VK_F13"] = "F13";
-        XUL_KEYCODE_MAPS2["VK_F14"] = "F14";
-        XUL_KEYCODE_MAPS2["VK_F15"] = "F15";
-        XUL_KEYCODE_MAPS2["VK_F16"] = "F16";
-        XUL_KEYCODE_MAPS2["VK_F17"] = "F17";
-        XUL_KEYCODE_MAPS2["VK_F18"] = "F18";
-        XUL_KEYCODE_MAPS2["VK_F19"] = "F19";
-        XUL_KEYCODE_MAPS2["VK_F20"] = "F20";
-        XUL_KEYCODE_MAPS2["VK_F21"] = "Soft1";
-        XUL_KEYCODE_MAPS2["VK_F22"] = "Soft2";
-        XUL_KEYCODE_MAPS2["VK_F23"] = "Soft3";
-        XUL_KEYCODE_MAPS2["VK_F24"] = "Soft4";
-        XUL_KEYCODE_MAPS2["VK_NUM_LOCK"] = "NumLock";
-        XUL_KEYCODE_MAPS2["VK_SCROLL_LOCK"] = "ScrollLock";
-        XUL_KEYCODE_MAPS2["VK_COMMA"] = ",";
-        XUL_KEYCODE_MAPS2["VK_PERIOD"] = ".";
-        XUL_KEYCODE_MAPS2["VK_SLASH"] = "Divide";
-        XUL_KEYCODE_MAPS2["VK_BACK_QUOTE"] = "`";
-        XUL_KEYCODE_MAPS2["VK_OPEN_BRACKET"] = "[";
-        XUL_KEYCODE_MAPS2["VK_CLOSE_BRACKET"] = "]";
-        XUL_KEYCODE_MAPS2["VK_QUOTE"] = "\\";
-        XUL_KEYCODE_MAPS2["VK_HELP"] = "Help";
-      })(XUL_KEYCODE_MAPS || (XUL_KEYCODE_MAPS = {}));
-      function getElementKeyCallback(keyId) {
-        return function() {
-          var _a;
-          const win = basic_1.BasicTool.getZotero().getMainWindow();
-          const keyElem = win.document.querySelector(`#${keyId}`);
-          if (!keyElem) {
-            return function() {
-            };
-          }
-          const _eval = win.eval;
-          _eval(keyElem.getAttribute("oncommand") || "//");
-          const cmdId = keyElem.getAttribute("command");
-          if (!cmdId) {
-            return;
-          }
-          _eval(((_a = win.document.querySelector(`#${cmdId}`)) === null || _a === void 0 ? void 0 : _a.getAttribute("oncommand")) || "//");
-        };
-      }
-      function getBuiltinEventKeyCallback(eventId) {
-        return function() {
-          const Zotero2 = basic_1.BasicTool.getZotero();
-          const ZoteroPane = Zotero2.getActiveZoteroPane();
-          ZoteroPane.handleKeyPress({
-            metaKey: true,
-            ctrlKey: true,
-            shiftKey: true,
-            originalTarget: { id: "" },
-            preventDefault: () => {
-            },
-            key: Zotero2.Prefs.get(`extensions.zotero.keys.${eventId}`, true)
-          });
-        };
-      }
-      var ELEM_KEY_IGNORE = ["key_copyCitation", "key_copyBibliography"];
-      var PREF_KEYS = [
-        {
-          id: "extensions.zotero.keys.copySelectedItemCitationsToClipboard",
-          modifiers: "accel,shift",
-          elemId: "key_copyCitation",
-          callback: getElementKeyCallback("key_copyCitation")
-        },
-        {
-          id: "extensions.zotero.keys.copySelectedItemsToClipboard",
-          modifiers: "accel,shift",
-          elemId: "key_copyBibliography",
-          callback: getElementKeyCallback("key_copyBibliography")
-        },
-        {
-          id: "extensions.zotero.keys.library",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("library")
-        },
-        {
-          id: "extensions.zotero.keys.newItem",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("newItem")
-        },
-        {
-          id: "extensions.zotero.keys.newNote",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("newNote")
-        },
-        {
-          id: "extensions.zotero.keys.quicksearch",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("quicksearch")
-        },
-        {
-          id: "extensions.zotero.keys.saveToZotero",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("saveToZotero")
-        },
-        {
-          id: "extensions.zotero.keys.sync",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("sync")
-        },
-        {
-          id: "extensions.zotero.keys.toggleAllRead",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("toggleAllRead")
-        },
-        {
-          id: "extensions.zotero.keys.toggleRead",
-          modifiers: "accel,shift",
-          callback: getBuiltinEventKeyCallback("toggleRead")
-        }
-      ];
-      var BUILTIN_KEYS = [
-        {
-          id: "showItemCollection",
-          modifiers: "",
-          key: "Ctrl",
-          callback: () => {
-            const Zotero2 = basic_1.BasicTool.getZotero();
-            const ZoteroPane = Zotero2.getActiveZoteroPane();
-            ZoteroPane.handleKeyUp({
-              originalTarget: {
-                id: ZoteroPane.itemsView ? ZoteroPane.itemsView.id : ""
-              },
-              keyCode: Zotero2.isWin ? 17 : 18
-            });
-          }
-        },
-        {
-          id: "closeSelectedTab",
-          modifiers: "accel",
-          key: "W",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            if (ztabs.selectedIndex > 0) {
-              ztabs.close("");
-            }
-          }
-        },
-        {
-          id: "undoCloseTab",
-          modifiers: "accel,shift",
-          key: "T",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.undoClose();
-          }
-        },
-        {
-          id: "selectNextTab",
-          modifiers: "control",
-          key: "Tab",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.selectPrev();
-          }
-        },
-        {
-          id: "selectPreviousTab",
-          modifiers: "control,shift",
-          key: "Tab",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.selectNext();
-          }
-        },
-        {
-          id: "selectTab1",
-          modifiers: "accel",
-          key: "1",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(0);
-          }
-        },
-        {
-          id: "selectTab2",
-          modifiers: "accel",
-          key: "2",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(1);
-          }
-        },
-        {
-          id: "selectTab3",
-          modifiers: "accel",
-          key: "3",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(2);
-          }
-        },
-        {
-          id: "selectTab4",
-          modifiers: "accel",
-          key: "4",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(3);
-          }
-        },
-        {
-          id: "selectTab5",
-          modifiers: "accel",
-          key: "5",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(4);
-          }
-        },
-        {
-          id: "selectTab6",
-          modifiers: "accel",
-          key: "6",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(5);
-          }
-        },
-        {
-          id: "selectTab7",
-          modifiers: "accel",
-          key: "7",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(6);
-          }
-        },
-        {
-          id: "selectTab8",
-          modifiers: "accel",
-          key: "8",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.jump(7);
-          }
-        },
-        {
-          id: "selectTabLast",
-          modifiers: "accel",
-          key: "9",
-          callback: () => {
-            const ztabs = basic_1.BasicTool.getZotero().getMainWindow().Zotero_Tabs;
-            ztabs.selectLast();
-          }
-        }
-      ];
-    }
-  });
-
   // node_modules/zotero-plugin-toolkit/dist/helpers/clipboard.js
   var require_clipboard = __commonJS({
     "node_modules/zotero-plugin-toolkit/dist/helpers/clipboard.js"(exports) {
@@ -4196,7 +2246,7 @@ If you do not know what it is, please click Cancel to deny.`);
         addText(source, type = "text/plain") {
           const str = Components.classes["@mozilla.org/supports-string;1"].createInstance(Components.interfaces.nsISupportsString);
           str.data = source;
-          if (this.isFX115() && type === "text/unicode")
+          if (type === "text/unicode")
             type = "text/plain";
           this.transferable.addDataFlavor(type);
           this.transferable.setTransferData(type, str, source.length * 2);
@@ -4265,22 +2315,18 @@ If you do not know what it is, please click Cancel to deny.`);
       exports.FilePickerHelper = void 0;
       var basic_1 = require_basic();
       var FilePickerHelper = class extends basic_1.BasicTool {
-        constructor(title, mode, filters, suggestion, window2, filterMask) {
+        constructor(title, mode, filters, suggestion, window2, filterMask, directory) {
           super();
           this.title = title;
           this.mode = mode;
           this.filters = filters;
           this.suggestion = suggestion;
+          this.directory = directory;
           this.window = window2;
           this.filterMask = filterMask;
         }
         async open() {
-          let backend;
-          if (this.isFX115()) {
-            backend = ChromeUtils.importESModule("chrome://zotero/content/modules/filePicker.mjs").FilePicker;
-          } else {
-            backend = this.getGlobal("require")("zotero/modules/filePicker").default;
-          }
+          let backend = ChromeUtils.importESModule("chrome://zotero/content/modules/filePicker.mjs").FilePicker;
           const fp = new backend();
           fp.init(this.window || this.getGlobal("window"), this.title, this.getMode(fp));
           for (const [label, ext] of this.filters || []) {
@@ -4290,6 +2336,8 @@ If you do not know what it is, please click Cancel to deny.`);
             fp.appendFilters(this.getFilterMask(fp));
           if (this.suggestion)
             fp.defaultString = this.suggestion;
+          if (this.directory)
+            fp.displayDirectory = this.directory;
           const userChoice = await fp.show();
           switch (userChoice) {
             case fp.returnOK:
@@ -4740,11 +2788,24 @@ If you do not know what it is, please click Cancel to deny.`);
               }
             }));
           });
-          win.document.head.appendChild(dialogHelper.createElement(win.document, "style", {
-            properties: {
-              innerHTML: style
-            }
-          }));
+          dialogHelper.appendElement({
+            tag: "fragment",
+            children: [
+              {
+                tag: "style",
+                properties: {
+                  innerHTML: style
+                }
+              },
+              {
+                tag: "link",
+                properties: {
+                  rel: "stylesheet",
+                  href: "chrome://zotero-platform/content/zotero.css"
+                }
+              }
+            ]
+          }, win.document.head);
           replaceElement(elementProps, dialogHelper);
           win.document.body.appendChild(dialogHelper.createElement(win.document, "fragment", {
             children: [elementProps]
@@ -4811,7 +2872,7 @@ If you do not know what it is, please click Cancel to deny.`);
       function replaceElement(elementProps, uiTool) {
         var _a, _b, _c, _d, _e, _f, _g;
         let checkChildren = true;
-        if (elementProps.tag === "select" && uiTool.isZotero7()) {
+        if (elementProps.tag === "select") {
           checkChildren = false;
           const customSelectProps = {
             tag: "div",
@@ -4908,25 +2969,6 @@ If you do not know what it is, please click Cancel to deny.`);
         }
       }
       var style = `
-html,
-body {
-  font-size: calc(12px * 1);
-  font-family: initial;
-}
-@media (prefers-color-scheme: light) {
-  html,
-  body {
-    background-color: #ffffff;
-    color: #000000;
-  }
-}
-@media (prefers-color-scheme: dark) {
-  html,
-  body {
-    background-color: #1e1e1e;
-    color: #ffffff;
-  }
-}
 .zotero-text-link {
   -moz-user-focus: normal;
   color: -moz-nativehyperlinktext;
@@ -4941,7 +2983,7 @@ body {
 .dropdown-content {
   display: none;
   position: absolute;
-  background-color: #f9f9fb;
+  background-color: var(--material-toolbar);
   min-width: 160px;
   box-shadow: 0px 0px 5px 0px rgba(0, 0, 0, 0.5);
   border-radius: 5px;
@@ -4953,290 +2995,117 @@ body {
   padding: 5px 10px 5px 10px;
 }
 .dropdown-item:hover {
-  background-color: #efeff3;
+  background-color: var(--fill-quinary);
 }
 `;
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/managers/readerInstance.js
-  var require_readerInstance = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/readerInstance.js"(exports) {
+  // node_modules/zotero-plugin-toolkit/dist/helpers/patch.js
+  var require_patch = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/helpers/patch.js"(exports) {
       "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
       Object.defineProperty(exports, "__esModule", { value: true });
-      exports.ReaderInstanceManager = void 0;
+      exports.PatchHelper = void 0;
       var basic_1 = require_basic();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var ReaderInstanceManager = class extends basic_1.ManagerTool {
-        constructor(base) {
-          super(base);
-          this.cachedHookIds = [];
-          this.initializeGlobal();
+      var PatchHelper = class extends basic_1.BasicTool {
+        constructor() {
+          super();
+          this.options = void 0;
         }
-        /**
-         * Register a reader instance hook
-         * @deprecated
-         * @remarks
-         * initialized: called when reader instance is ready
-         * @param type hook type
-         * @param id hook id
-         * @param hook
-         */
-        register(type, id, hook) {
+        setData(options) {
+          this.options = options;
           const Zotero2 = this.getGlobal("Zotero");
-          switch (type) {
-            case "initialized":
-              {
-                this.globalCache.initializedHooks[id] = hook;
-                Zotero2.Reader._readers.forEach(hook);
+          const { target, funcSign, patcher } = options;
+          const origin = target[funcSign];
+          this.log("patching ", funcSign);
+          target[funcSign] = function(...args) {
+            if (options.enabled)
+              try {
+                return patcher(origin).apply(this, args);
+              } catch (e) {
+                Zotero2.logError(e);
               }
-              break;
-            default:
-              break;
-          }
-          this.cachedHookIds.push(id);
+            return origin.apply(this, args);
+          };
+          return this;
         }
-        /**
-         * Unregister hook by id
-         * @param id
-         */
-        unregister(id) {
-          delete this.globalCache.initializedHooks[id];
+        enable() {
+          if (!this.options)
+            throw new Error("No patch data set");
+          this.options.enabled = true;
+          return this;
         }
-        /**
-         * Unregister all hooks
-         */
-        unregisterAll() {
-          this.cachedHookIds.forEach((id) => this.unregister(id));
-        }
-        initializeGlobal() {
-          this.globalCache = toolkitGlobal_1.default.getInstance().readerInstance;
-          if (!this.globalCache._ready) {
-            this.globalCache._ready = true;
-            const Zotero2 = this.getGlobal("Zotero");
-            const _this = this;
-            Zotero2.Reader._readers = new (this.getGlobal("Proxy"))(Zotero2.Reader._readers, {
-              set(target, p, newValue, receiver) {
-                target[p] = newValue;
-                if (!isNaN(Number(p))) {
-                  Object.values(_this.globalCache.initializedHooks).forEach((hook) => {
-                    try {
-                      hook(newValue);
-                    } catch (e) {
-                      _this.log(e);
-                    }
-                  });
-                }
-                return true;
-              }
-            });
-          }
+        disable() {
+          if (!this.options)
+            throw new Error("No patch data set");
+          this.options.enabled = false;
+          return this;
         }
       };
-      exports.ReaderInstanceManager = ReaderInstanceManager;
+      exports.PatchHelper = PatchHelper;
     }
   });
 
-  // node_modules/zotero-plugin-toolkit/dist/managers/itemBox.js
-  var require_itemBox = __commonJS({
-    "node_modules/zotero-plugin-toolkit/dist/managers/itemBox.js"(exports) {
+  // node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js
+  var require_fieldHook = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/managers/fieldHook.js"(exports) {
       "use strict";
-      var __importDefault = exports && exports.__importDefault || function(mod) {
-        return mod && mod.__esModule ? mod : { "default": mod };
-      };
       Object.defineProperty(exports, "__esModule", { value: true });
-      exports.ItemBoxManager = void 0;
+      exports.FieldHookManager = void 0;
+      var patch_1 = require_patch();
       var basic_1 = require_basic();
-      var fieldHook_1 = require_fieldHook();
-      var patch_1 = require_patch2();
-      var toolkitGlobal_1 = __importDefault(require_toolkitGlobal());
-      var ItemBoxManager = class extends basic_1.ManagerTool {
+      var FieldHookManager = class extends basic_1.ManagerTool {
         constructor(base) {
           super(base);
-          this.initializationLock = this.getGlobal("Zotero").Promise.defer();
-          this.localCache = [];
-          this.fieldHooks = new fieldHook_1.FieldHookManager();
-          this.patcherManager = new patch_1.PatcherManager();
-          this.initializeGlobal();
-        }
-        /**
-         * Register a custom row
-         * @param field Field name. Used in `getField` and `setField`.
-         * @param displayName The row header display text.
-         * @param getFieldHook Called when loading row content.
-         * If you registered the getField hook somewhere else (in ItemBox or FieldHooks), leave it undefined.
-         * @param options
-         * @param options.editable If the row is editable.
-         * To edit a row, either the `options.setFieldHook` or a custom hook for `setField` created by FieldHookManager is required.
-         * @param options.setFieldHook The `setField` hook.
-         * @param options.index Target index. By default it's placed at the end of rows.
-         * @param options.multiline If the row content is multiline.
-         * @param options.collapsible If the row content is collapsible (like abstract field).
-         */
-        async register(field, displayName, getFieldHook, options = {}) {
-          this.fieldHooks.register("isFieldOfBase", field, () => false);
-          if (getFieldHook) {
-            this.fieldHooks.register("getField", field, getFieldHook);
-          }
-          if (options.editable && options.setFieldHook) {
-            this.fieldHooks.register("setField", field, options.setFieldHook);
-          }
-          this.globalCache.fieldOptions[field] = {
-            field,
-            displayName,
-            editable: options.editable || false,
-            index: options.index || -1,
-            multiline: options.multiline || false,
-            collapsible: options.collapsible || false
+          this.data = {
+            getField: {},
+            setField: {},
+            isFieldOfBase: {}
           };
-          this.localCache.push(field);
-          await this.initializationLock.promise;
-          this.refresh();
-        }
-        /**
-         * Unregister a row of specific field.
-         * @param field
-         * @param options Skip unregister of certain hooks.
-         * This is useful when the hook is not initialized by this instance
-         * @param options.skipRefresh Skip refresh after unregister.
-         */
-        unregister(field, options = {}) {
-          delete this.globalCache.fieldOptions[field];
-          if (!options.skipIsFieldOfBase) {
-            this.fieldHooks.unregister("isFieldOfBase", field);
-          }
-          if (!options.skipGetField) {
-            this.fieldHooks.unregister("getField", field);
-          }
-          if (!options.skipSetField) {
-            this.fieldHooks.unregister("setField", field);
-          }
-          const idx = this.localCache.indexOf(field);
-          if (idx > -1) {
-            this.localCache.splice(idx, 1);
-          }
-          if (!options.skipRefresh) {
-            this.refresh();
-          }
-        }
-        unregisterAll() {
-          [...this.localCache].forEach((field) => this.unregister(field, {
-            skipGetField: true,
-            skipSetField: true,
-            skipIsFieldOfBase: true,
-            skipRefresh: true
-          }));
-          this.fieldHooks.unregisterAll();
-          this.refresh();
-        }
-        /**
-         * Refresh all item boxes.
-         */
-        refresh() {
-          try {
-            Array.from(this.getGlobal("document").querySelectorAll(this.isZotero7() ? "item-box" : "zoteroitembox")).forEach((elem) => elem.refresh());
-          } catch (e) {
-            this.log(e);
-          }
-        }
-        async initializeGlobal() {
-          const Zotero2 = this.getGlobal("Zotero");
-          await Zotero2.uiReadyPromise;
-          const window2 = this.getGlobal("window");
-          this.globalCache = toolkitGlobal_1.default.getInstance().itemBox;
-          const globalCache = this.globalCache;
-          const inZotero7 = this.isZotero7();
-          if (!globalCache._ready) {
-            globalCache._ready = true;
-            let itemBoxInstance;
-            if (inZotero7) {
-              itemBoxInstance = new (this.getGlobal("customElements").get("item-box"))();
-            } else {
-              itemBoxInstance = window2.document.querySelector("#zotero-editpane-item-box");
-              const wait = 5e3;
-              let t = 0;
-              while (!itemBoxInstance && t < wait) {
-                itemBoxInstance = window2.document.querySelector("#zotero-editpane-item-box");
-                await Zotero2.Promise.delay(10);
-                t += 10;
-              }
-              if (!itemBoxInstance) {
-                globalCache._ready = false;
-                this.log("ItemBox initialization failed");
-                return;
-              }
-            }
-            this.patcherManager.register(itemBoxInstance.__proto__, "refresh", (original) => function() {
-              const originalThis = this;
-              original.apply(originalThis, arguments);
-              for (const extraField of Object.values(globalCache.fieldOptions)) {
-                const fieldHeader = document.createElement(inZotero7 ? "th" : "label");
-                fieldHeader.setAttribute("fieldname", extraField.field);
-                const prefKey = `extensions.zotero.pluginToolkit.fieldCollapsed.${extraField.field}`;
-                const collapsed = extraField.multiline && extraField.collapsible && Zotero2.Prefs.get(prefKey, true);
-                let headerContent = extraField.displayName;
-                if (collapsed) {
-                  headerContent = `(...)${headerContent}`;
-                }
-                if (inZotero7) {
-                  let label = document.createElement("label");
-                  label.className = "key";
-                  label.textContent = headerContent;
-                  fieldHeader.appendChild(label);
-                } else {
-                  fieldHeader.setAttribute("value", headerContent);
-                }
-                const _clickable = originalThis.clickable;
-                originalThis.clickable = extraField.editable;
-                const fieldValue = originalThis.createValueElement(originalThis.item.getField(extraField.field), extraField.field, 1099);
-                originalThis.clickable = _clickable;
-                if (extraField.multiline && !Zotero2.Prefs.get(prefKey, true)) {
-                  fieldValue.classList.add("multiline");
-                } else if (!inZotero7) {
-                  fieldValue.setAttribute("crop", "end");
-                  fieldValue.setAttribute("value", fieldValue.innerHTML);
-                  fieldValue.innerHTML = "";
-                }
-                if (extraField.collapsible) {
-                  fieldHeader.addEventListener("click", function(ev) {
-                    Zotero2.Prefs.set(prefKey, !(Zotero2.Prefs.get(prefKey, true) || false), true);
-                    originalThis.refresh();
-                  });
-                }
-                fieldHeader.addEventListener("click", inZotero7 ? function(ev) {
-                  var _a;
-                  const inputField = (_a = ev.currentTarget.nextElementSibling) === null || _a === void 0 ? void 0 : _a.querySelector("input, textarea");
-                  if (inputField) {
-                    inputField.blur();
+          this.patchHelpers = {
+            getField: new patch_1.PatchHelper(),
+            setField: new patch_1.PatchHelper(),
+            isFieldOfBase: new patch_1.PatchHelper()
+          };
+          const _thisHelper = this;
+          for (const type of Object.keys(this.patchHelpers)) {
+            const helper = this.patchHelpers[type];
+            helper.setData({
+              target: this.getGlobal("Zotero").Item.prototype,
+              funcSign: type,
+              patcher: (original) => function(field, ...args) {
+                const originalThis = this;
+                const handler = _thisHelper.data[type][field];
+                if (typeof handler === "function") {
+                  try {
+                    return handler(field, args[0], args[1], originalThis, original);
+                  } catch (e) {
+                    return field + String(e);
                   }
-                } : function(ev) {
-                  var _a;
-                  const inputField = (_a = ev.currentTarget.nextElementSibling) === null || _a === void 0 ? void 0 : _a.inputField;
-                  if (inputField) {
-                    inputField.blur();
-                  }
-                });
-                const table = inZotero7 ? originalThis._infoTable : originalThis._dynamicFields;
-                let fieldIndex = extraField.index;
-                if (fieldIndex === 0) {
-                  fieldIndex = 1;
                 }
-                if (fieldIndex && fieldIndex >= 0 && fieldIndex < table.children.length) {
-                  originalThis._beforeRow = table.children[fieldIndex];
-                  originalThis.addDynamicRow(fieldHeader, fieldValue, true);
-                } else {
-                  originalThis.addDynamicRow(fieldHeader, fieldValue);
-                }
-              }
+                return original.apply(originalThis, [field, ...args]);
+              },
+              enabled: true
             });
           }
-          this.initializationLock.resolve();
+        }
+        register(type, field, hook) {
+          this.data[type][field] = hook;
+        }
+        unregister(type, field) {
+          delete this.data[type][field];
+        }
+        unregisterAll() {
+          this.data.getField = {};
+          this.data.setField = {};
+          this.data.isFieldOfBase = {};
+          this.patchHelpers.getField.disable();
+          this.patchHelpers.setField.disable();
+          this.patchHelpers.isFieldOfBase.disable();
         }
       };
-      exports.ItemBoxManager = ItemBoxManager;
+      exports.FieldHookManager = FieldHookManager;
     }
   });
 
@@ -5544,9 +3413,13 @@ body {
           Zotero.Reader.registerEventListener("renderToolbar", (event) => this.addReaderKeyboardCallback(event), this._basicOptions.api.pluginID);
           Zotero.Reader._readers.forEach((reader) => this.addReaderKeyboardCallback({ reader }));
         }
-        addReaderKeyboardCallback(event) {
+        async addReaderKeyboardCallback(event) {
           const reader = event.reader;
           let initializedKey = `_ztoolkitKeyboard${this.id}Initialized`;
+          await (0, wait_1.waitForReader)(reader);
+          if (!reader._iframeWindow) {
+            return;
+          }
           if (reader._iframeWindow[initializedKey]) {
             return;
           }
@@ -5708,6 +3581,400 @@ body {
     }
   });
 
+  // node_modules/zotero-plugin-toolkit/dist/helpers/guide.js
+  var require_guide = __commonJS({
+    "node_modules/zotero-plugin-toolkit/dist/helpers/guide.js"(exports) {
+      "use strict";
+      Object.defineProperty(exports, "__esModule", { value: true });
+      exports.GuideHelper = void 0;
+      var basic_1 = require_basic();
+      var GuideHelper = class extends basic_1.BasicTool {
+        constructor() {
+          super();
+          this._steps = [];
+        }
+        addStep(step) {
+          this._steps.push(step);
+          return this;
+        }
+        addSteps(steps) {
+          this._steps.push(...steps);
+          return this;
+        }
+        async show(doc) {
+          if (!(doc === null || doc === void 0 ? void 0 : doc.ownerGlobal)) {
+            throw new Error("Document is required.");
+          }
+          const guide = new Guide(doc.ownerGlobal);
+          await guide.show(this._steps);
+          const promise = new Promise((resolve) => {
+            guide._panel.addEventListener("guide-finished", () => resolve(guide));
+          });
+          await promise;
+          return guide;
+        }
+        async highlight(doc, step) {
+          if (!(doc === null || doc === void 0 ? void 0 : doc.ownerGlobal)) {
+            throw new Error("Document is required.");
+          }
+          const guide = new Guide(doc.ownerGlobal);
+          await guide.show([step]);
+          const promise = new Promise((resolve) => {
+            guide._panel.addEventListener("guide-finished", () => resolve(guide));
+          });
+          await promise;
+          return guide;
+        }
+      };
+      exports.GuideHelper = GuideHelper;
+      var Guide = class {
+        get content() {
+          return this._window.MozXULElement.parseXULToFragment(`
+      <panel id="${this._id}" class="guide-panel" type="arrow" align="top" noautohide="true">
+          <html:div class="guide-panel-content">
+              <html:div class="guide-panel-header"></html:div>
+              <html:div class="guide-panel-body"></html:div>
+              <html:div class="guide-panel-footer">
+                  <html:div class="guide-panel-progress"></html:div>
+                  <html:div class="guide-panel-buttons">
+                      <button id="prev-button" class="guide-panel-button" hidden="true"></button>
+                      <button id="next-button" class="guide-panel-button" hidden="true"></button>
+                      <button id="close-button" class="guide-panel-button" hidden="true"></button>
+                  </html:div>
+              </html:div>
+          </html:div>
+          <html:style>
+              .guide-panel {
+                  background-color: var(--material-menu);
+                  color: var(--fill-primary);
+              }
+              .guide-panel-content {
+                  display: flex;
+                  flex-direction: column;
+                  padding: 0;
+              }
+              .guide-panel-header {
+                  font-size: 1.2em;
+                  font-weight: bold;
+                  margin-bottom: 10px;
+              }
+              .guide-panel-header:empty {
+                display: none;
+              }
+              .guide-panel-body {
+                  align-items: center;
+                  display: flex;
+                  flex-direction: column;
+                  white-space: pre-wrap;
+              }
+              .guide-panel-body:empty {
+                display: none;
+              }
+              .guide-panel-footer {
+                  display: flex;
+                  flex-direction: row;
+                  align-items: center;
+                  justify-content: space-between;
+                  margin-top: 10px;
+              }
+              .guide-panel-progress {
+                  font-size: 0.8em;
+              }
+              .guide-panel-buttons {
+                  display: flex;
+                  flex-direction: row;
+                  flex-grow: 1;
+                  justify-content: flex-end;
+              }
+          </html:style>
+      </panel>
+  `);
+        }
+        get currentStep() {
+          if (!this._steps)
+            return void 0;
+          return this._steps[this._currentIndex];
+        }
+        get currentTarget() {
+          const step = this.currentStep;
+          if (!(step === null || step === void 0 ? void 0 : step.element))
+            return void 0;
+          let elem;
+          if (typeof step.element === "function") {
+            elem = step.element();
+          } else if (typeof step.element === "string") {
+            elem = document.querySelector(step.element);
+          } else if (!step.element) {
+            elem = document.documentElement;
+          } else {
+            elem = step.element;
+          }
+          return elem;
+        }
+        get hasNext() {
+          return this._steps && this._currentIndex < this._steps.length - 1;
+        }
+        get hasPrevious() {
+          return this._steps && this._currentIndex > 0;
+        }
+        get hookProps() {
+          return {
+            config: this.currentStep,
+            state: {
+              step: this._currentIndex,
+              steps: this._steps,
+              controller: this
+            }
+          };
+        }
+        get panel() {
+          return this._panel;
+        }
+        constructor(win) {
+          this._id = `guide-${Zotero.Utilities.randomString()}`;
+          this._cachedMasks = [];
+          this._centerPanel = () => {
+            const win2 = this._window;
+            this._panel.moveTo(win2.screenX + win2.innerWidth / 2 - this._panel.clientWidth / 2, win2.screenY + win2.innerHeight / 2 - this._panel.clientHeight / 2);
+          };
+          this._window = win;
+          this._noClose = false;
+          this._closed = false;
+          this._autoNext = true;
+          this._currentIndex = 0;
+          const doc = win.document;
+          let content = this.content;
+          if (content) {
+            doc.documentElement.append(doc.importNode(content, true));
+          }
+          this._panel = doc.querySelector(`#${this._id}`);
+          this._header = this._panel.querySelector(".guide-panel-header");
+          this._body = this._panel.querySelector(".guide-panel-body");
+          this._footer = this._panel.querySelector(".guide-panel-footer");
+          this._progress = this._panel.querySelector(".guide-panel-progress");
+          this._closeButton = this._panel.querySelector("#close-button");
+          this._prevButton = this._panel.querySelector("#prev-button");
+          this._nextButton = this._panel.querySelector("#next-button");
+          this._closeButton.addEventListener("click", async () => {
+            var _a;
+            if ((_a = this.currentStep) === null || _a === void 0 ? void 0 : _a.onCloseClick) {
+              await this.currentStep.onCloseClick(this.hookProps);
+            }
+            this.abort();
+          });
+          this._prevButton.addEventListener("click", async () => {
+            var _a;
+            if ((_a = this.currentStep) === null || _a === void 0 ? void 0 : _a.onPrevClick) {
+              await this.currentStep.onPrevClick(this.hookProps);
+            }
+            this.movePrevious();
+          });
+          this._nextButton.addEventListener("click", async () => {
+            var _a;
+            if ((_a = this.currentStep) === null || _a === void 0 ? void 0 : _a.onNextClick) {
+              await this.currentStep.onNextClick(this.hookProps);
+            }
+            this.moveNext();
+          });
+          this._panel.addEventListener("popupshown", this._handleShown.bind(this));
+          this._panel.addEventListener("popuphidden", this._handleHidden.bind(this));
+          this._window.addEventListener("resize", this._centerPanel);
+        }
+        async show(steps) {
+          if (steps) {
+            this._steps = steps;
+            this._currentIndex = 0;
+          }
+          let index = this._currentIndex;
+          this._noClose = false;
+          this._closed = false;
+          this._autoNext = true;
+          const step = this.currentStep;
+          if (!step)
+            return;
+          const elem = this.currentTarget;
+          if (step.onBeforeRender) {
+            await step.onBeforeRender(this.hookProps);
+            if (index !== this._currentIndex) {
+              await this.show();
+              return;
+            }
+          }
+          if (step.onMask) {
+            step.onMask({ mask: (_e) => this._createMask(_e) });
+          } else {
+            this._createMask(elem);
+          }
+          let x, y = 0;
+          let position = step.position || "after_start";
+          if (position === "center") {
+            position = "overlap";
+            x = window.innerWidth / 2;
+            y = window.innerHeight / 2;
+          }
+          this._panel.openPopup(elem, step.position || "after_start", x, y, false, false);
+        }
+        hide() {
+          this._panel.hidePopup();
+        }
+        abort() {
+          this._closed = true;
+          this.hide();
+          this._steps = void 0;
+        }
+        moveTo(stepIndex) {
+          if (!this._steps) {
+            this.hide();
+            return;
+          }
+          if (stepIndex < 0)
+            stepIndex = 0;
+          if (!this._steps[stepIndex]) {
+            this._currentIndex = this._steps.length;
+            this.hide();
+            return;
+          }
+          this._autoNext = false;
+          this._noClose = true;
+          this.hide();
+          this._noClose = false;
+          this._autoNext = true;
+          this._currentIndex = stepIndex;
+          this.show();
+        }
+        moveNext() {
+          this.moveTo(this._currentIndex + 1);
+        }
+        movePrevious() {
+          this.moveTo(this._currentIndex - 1);
+        }
+        _handleShown() {
+          if (!this._steps)
+            return;
+          const step = this.currentStep;
+          if (!step)
+            return;
+          this._header.innerHTML = step.title || "";
+          this._body.innerHTML = step.description || "";
+          this._panel.querySelectorAll(".guide-panel-button").forEach((elem) => {
+            elem.hidden = true;
+            elem.disabled = false;
+          });
+          let showButtons = step.showButtons;
+          if (!showButtons) {
+            showButtons = [];
+            if (this.hasPrevious) {
+              showButtons.push("prev");
+            }
+            if (this.hasNext) {
+              showButtons.push("next");
+            } else {
+              showButtons.push("close");
+            }
+          }
+          if (showButtons === null || showButtons === void 0 ? void 0 : showButtons.length) {
+            showButtons.forEach((btn) => {
+              this._panel.querySelector(`#${btn}-button`).hidden = false;
+            });
+          }
+          if (step.disableButtons) {
+            step.disableButtons.forEach((btn) => {
+              this._panel.querySelector(`#${btn}-button`).disabled = true;
+            });
+          }
+          if (step.showProgress) {
+            this._progress.hidden = false;
+            this._progress.textContent = step.progressText || `${this._currentIndex + 1}/${this._steps.length}`;
+          } else {
+            this._progress.hidden = true;
+          }
+          this._closeButton.label = step.closeBtnText || "Done";
+          this._nextButton.label = step.nextBtnText || "Next";
+          this._prevButton.label = step.prevBtnText || "Previous";
+          if (step.onRender) {
+            step.onRender(this.hookProps);
+          }
+          if (step.position === "center") {
+            this._centerPanel();
+            this._window.setTimeout(this._centerPanel, 10);
+          }
+        }
+        async _handleHidden() {
+          this._removeMask();
+          this._header.innerHTML = "";
+          this._body.innerHTML = "";
+          this._progress.textContent = "";
+          if (!this._steps)
+            return;
+          const step = this.currentStep;
+          if (step && step.onExit) {
+            await step.onExit(this.hookProps);
+          }
+          if (!this._noClose && (this._closed || !this.hasNext)) {
+            this._panel.dispatchEvent(new this._window.CustomEvent("guide-finished"));
+            this._panel.remove();
+            this._window.removeEventListener("resize", this._centerPanel);
+            return;
+          }
+          if (this._autoNext) {
+            this.moveNext();
+          }
+        }
+        _createMask(targetElement) {
+          const doc = (targetElement === null || targetElement === void 0 ? void 0 : targetElement.ownerDocument) || this._window.document;
+          const NS = "http://www.w3.org/2000/svg";
+          const svg = doc.createElementNS(NS, "svg");
+          svg.id = "guide-panel-mask";
+          svg.style.position = "fixed";
+          svg.style.top = "0";
+          svg.style.left = "0";
+          svg.style.width = "100%";
+          svg.style.height = "100%";
+          svg.style.zIndex = "9999";
+          const mask = doc.createElementNS(NS, "mask");
+          mask.id = "mask";
+          const fullRect = doc.createElementNS(NS, "rect");
+          fullRect.setAttribute("x", "0");
+          fullRect.setAttribute("y", "0");
+          fullRect.setAttribute("width", "100%");
+          fullRect.setAttribute("height", "100%");
+          fullRect.setAttribute("fill", "white");
+          mask.appendChild(fullRect);
+          if (targetElement) {
+            const rect = targetElement.getBoundingClientRect();
+            const targetRect = doc.createElementNS(NS, "rect");
+            targetRect.setAttribute("x", rect.left.toString());
+            targetRect.setAttribute("y", rect.top.toString());
+            targetRect.setAttribute("width", rect.width.toString());
+            targetRect.setAttribute("height", rect.height.toString());
+            targetRect.setAttribute("fill", "black");
+            mask.appendChild(targetRect);
+          }
+          const maskedRect = doc.createElementNS(NS, "rect");
+          maskedRect.setAttribute("x", "0");
+          maskedRect.setAttribute("y", "0");
+          maskedRect.setAttribute("width", "100%");
+          maskedRect.setAttribute("height", "100%");
+          maskedRect.setAttribute("mask", "url(#mask)");
+          maskedRect.setAttribute("opacity", "0.7");
+          svg.appendChild(mask);
+          svg.appendChild(maskedRect);
+          this._cachedMasks.push(new WeakRef(svg));
+          doc.documentElement.appendChild(svg);
+        }
+        _removeMask() {
+          this._cachedMasks.forEach((ref) => {
+            const mask = ref.deref();
+            if (mask) {
+              mask.remove();
+            }
+          });
+          this._cachedMasks = [];
+        }
+      };
+    }
+  });
+
   // node_modules/zotero-plugin-toolkit/dist/index.js
   var require_dist = __commonJS({
     "node_modules/zotero-plugin-toolkit/dist/index.js"(exports) {
@@ -5718,24 +3985,18 @@ body {
       var ui_1 = require_ui();
       var reader_1 = require_reader();
       var extraField_1 = require_extraField();
-      var itemTree_1 = require_itemTree();
       var prompt_1 = require_prompt();
-      var libraryTabPanel_1 = require_libraryTabPanel();
-      var readerTabPanel_1 = require_readerTabPanel();
       var menu_1 = require_menu();
-      var preferencePane_1 = require_preferencePane();
-      var shortcut_1 = require_shortcut();
       var clipboard_1 = require_clipboard();
       var filePicker_1 = require_filePicker();
       var progressWindow_1 = require_progressWindow();
       var virtualizedTable_1 = require_virtualizedTable();
       var dialog_1 = require_dialog();
-      var readerInstance_1 = require_readerInstance();
       var fieldHook_1 = require_fieldHook();
-      var itemBox_1 = require_itemBox();
       var largePref_1 = require_largePref();
       var keyboard_1 = require_keyboard();
       var patch_1 = require_patch();
+      var guide_1 = require_guide();
       var ZoteroToolkit2 = class extends basic_1.BasicTool {
         constructor() {
           super();
@@ -5743,16 +4004,9 @@ body {
           this.Reader = new reader_1.ReaderTool(this);
           this.ExtraField = new extraField_1.ExtraFieldTool(this);
           this.FieldHooks = new fieldHook_1.FieldHookManager(this);
-          this.ItemTree = new itemTree_1.ItemTreeManager(this);
-          this.ItemBox = new itemBox_1.ItemBoxManager(this);
           this.Keyboard = new keyboard_1.KeyboardManager(this);
           this.Prompt = new prompt_1.PromptManager(this);
-          this.LibraryTabPanel = new libraryTabPanel_1.LibraryTabPanelManager(this);
-          this.ReaderTabPanel = new readerTabPanel_1.ReaderTabPanelManager(this);
-          this.ReaderInstance = new readerInstance_1.ReaderInstanceManager(this);
           this.Menu = new menu_1.MenuManager(this);
-          this.PreferencePane = new preferencePane_1.PreferencePaneManager(this);
-          this.Shortcut = new shortcut_1.ShortcutManager(this);
           this.Clipboard = (0, basic_1.makeHelperTool)(clipboard_1.ClipboardHelper, this);
           this.FilePicker = (0, basic_1.makeHelperTool)(filePicker_1.FilePickerHelper, this);
           this.Patch = (0, basic_1.makeHelperTool)(patch_1.PatchHelper, this);
@@ -5760,6 +4014,7 @@ body {
           this.VirtualizedTable = (0, basic_1.makeHelperTool)(virtualizedTable_1.VirtualizedTableHelper, this);
           this.Dialog = (0, basic_1.makeHelperTool)(dialog_1.DialogHelper, this);
           this.LargePrefObject = (0, basic_1.makeHelperTool)(largePref_1.LargePrefHelper, this);
+          this.Guide = (0, basic_1.makeHelperTool)(guide_1.GuideHelper, this);
         }
         /**
          * Unregister everything created by managers.
@@ -5803,10 +4058,12 @@ body {
         }
       }, document.lastChild);
       window.addEventListener("click", (event) => {
-        if (!(event.target && event.target.baseURI == "resource://zotero/reader/reader.html" && event.target.tagName == "BUTTON" && event.target.className == "tag selected inactive" && event.target.innerText.match(/(Figure|Table)/))) {
+        if (!(event.target && event.target.baseURI == "resource://zotero/reader/reader.html" && event.target.tagName == "BUTTON" && event.target.classList.contains("tag") && event.target.innerText.match(/(Figure|Table)/))) {
           return;
         }
-        const reader = Zotero.Reader.getByTabID(Zotero_Tabs._tabs[Zotero_Tabs.selectedIndex].id);
+        event.preventDefault();
+        event.stopPropagation();
+        const reader = Zotero.Reader.getByTabID(Zotero_Tabs.selectedID);
         const am = reader._internalReader._annotationManager;
         this.clearFilter(reader);
         if (Zotero.BetterNotes?.hooks?.onShowImageViewer) {
@@ -5820,6 +4077,12 @@ body {
         }
       });
       addon.api.views = this;
+      Zotero.Reader.registerEventListener("renderTextSelectionPopup", (event) => {
+        const { reader } = event;
+        if (this.view == "Figure") {
+          this.switchToView(reader, "All");
+        }
+      });
     }
     async addToNote(item) {
       const popupWin = new ztoolkit.ProgressWindow("Figure", { closeTime: -1 }).createLine({ text: "Add To Note", type: "default" }).show();
@@ -6474,12 +4737,12 @@ body {
     return _ztoolkit;
   }
   function initZToolkit(_ztoolkit) {
-    const env = "production";
+    const env = "development";
     _ztoolkit.basicOptions.log.prefix = `[${config.addonName}]`;
     _ztoolkit.basicOptions.log.disableConsole = env === "production";
-    _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = false;
-    _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = false;
-    _ztoolkit.basicOptions.debug.disableDebugBridgePassword = false;
+    _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = true;
+    _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = true;
+    _ztoolkit.basicOptions.debug.disableDebugBridgePassword = true;
     _ztoolkit.ProgressWindow.setIconURI(
       "default",
       `chrome://${config.addonRef}/content/icons/favicon.png`
@@ -6499,7 +4762,7 @@ body {
     constructor() {
       this.data = {
         alive: true,
-        env: "production",
+        env: "development",
         ztoolkit: createZToolkit()
       };
       this.hooks = hooks_default;
