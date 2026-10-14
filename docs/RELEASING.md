@@ -14,6 +14,14 @@
 
 不需要额外的发布令牌或 npm 发布权限。仓库必须启用 GitHub Actions，且仓库或组织策略允许工作流请求 `contents: write`。发布失败时查看 Actions 日志，修复后重跑失败的工作流；不要移动已公开发布的标签。
 
+若标签已推送但没有产生运行记录，可在 Actions → Release → Run workflow 中输入已有标签，或在 GitHub CLI 登录后执行：
+
+```sh
+gh workflow run release.yml --repo pasiooooo/zotero-figure --ref bootstrap -f tag=v1.1.0
+```
+
+手动入口同样检出指定标签、运行完整检查并发布，标签所指向的代码不会改变。
+
 ## 本次 1.1.0
 
 版本与 changelog 已整理好，发布提交应同时包含功能改动、`package.json`、`package-lock.json`、`update.json` 及发布流程文件。
