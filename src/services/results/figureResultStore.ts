@@ -7,6 +7,7 @@ import {
   type FigureResultRecord,
 } from "../../domain/figureResults";
 import type { AnnotationCandidate, Rect } from "../../domain/layout";
+import { containsResultRegion } from "../../domain/resultRegion";
 import {
   OperationCancelledError,
   throwIfAborted,
@@ -97,6 +98,43 @@ export class FigureResultStore {
     try {
       const manifest = await this.readManifest(item);
       return manifest.results.map((result) => this.withImagePath(item, result));
+    } finally {
+      release();
+    }
+  }
+
+  public async hasAnalysis(
+    item: Zotero.Item,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const release = await this.acquireAttachmentLock(item, signal);
+    try {
+      if (!(await IOUtils.exists(this.getManifestPath(item)))) return false;
+      await this.readManifest(item);
+      throwIfAborted(signal);
+      return true;
+    } finally {
+      release();
+    }
+  }
+
+  public async ensureAnalysisRecord(
+    item: Zotero.Item,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const release = await this.acquireAttachmentLock(item, signal);
+    try {
+      const manifest = await this.readManifest(item);
+      throwIfAborted(signal);
+      // Successful analyses with no detections still need a saved record.
+      if (!manifest.updatedAt) {
+        await this.commit(
+          item,
+          manifest.results,
+          manifest.translations,
+          manifest.imageCache,
+        );
+      }
     } finally {
       release();
     }
@@ -513,6 +551,37 @@ export class FigureResultStore {
     );
   }
 
+  public async reconcileRegion(
+    item: Zotero.Item,
+    pageIndex: number,
+    region: Rect,
+    renderCandidates: readonly FigureResultRenderCandidate[],
+    images: readonly ArrayBuffer[],
+    signal?: AbortSignal,
+    sourceFingerprint?: string,
+  ): Promise<FigureResultStoreReconcile> {
+    const scope = normalizeResultRect(region);
+    if (
+      renderCandidates.some(
+        ({ detectedCandidate }) =>
+          !containsResultRegion(scope, detectedCandidate.rect),
+      )
+    ) {
+      throw new Error("Detected result is outside the selected region");
+    }
+    return this.reconcilePageWithRenderPlan(
+      item,
+      pageIndex,
+      renderCandidates.map(({ detectedCandidate }) => detectedCandidate),
+      images,
+      "replace-page",
+      signal,
+      sourceFingerprint,
+      renderCandidates.map(({ renderRect }) => renderRect),
+      scope,
+    );
+  }
+
   private async reconcilePageWithRenderPlan(
     item: Zotero.Item,
     pageIndex: number,
@@ -522,6 +591,7 @@ export class FigureResultStore {
     signal?: AbortSignal,
     sourceFingerprint?: string,
     renderRects?: readonly Rect[],
+    scopeRect?: Rect,
   ): Promise<FigureResultStoreReconcile> {
     if (candidates.length !== images.length) {
       throw new Error("Figure result images do not match detected candidates");
@@ -556,6 +626,7 @@ export class FigureResultStore {
         source,
         signal,
         renderRects,
+        scopeRect,
       );
       return { ...result, timings };
     } finally {
@@ -573,20 +644,51 @@ export class FigureResultStore {
     sourceFingerprint: string,
     signal?: AbortSignal,
     renderRects?: readonly Rect[],
+    scopeRect?: Rect,
   ): Promise<Omit<FigureResultStoreReconcile, "timings">> {
-    const entries = getUniqueCandidateEntries(candidates, images, renderRects);
-    const duplicateCandidates = candidates.length - entries.length;
+    let entries = getUniqueCandidateEntries(candidates, images, renderRects);
+    let duplicateCandidates = candidates.length - entries.length;
     const manifest = await this.readManifest(item);
+    if (scopeRect && candidates.length === 0) {
+      return {
+        created: 0,
+        removed: 0,
+        skipped: 0,
+        results: manifest.results.map((result) =>
+          this.withImagePath(item, result),
+        ),
+      };
+    }
     const imageCache = manifestCodec.pruneFigureResultImageCache(
       manifest.imageCache,
       manifest.results,
     );
-    const existingPage = manifest.results.filter(
-      (result) => result.pageIndex === pageIndex,
-    );
-    const otherResults = manifest.results.filter(
-      (result) => result.pageIndex !== pageIndex,
-    );
+    const inScope = (result: FigureResultRecord) =>
+      result.pageIndex === pageIndex &&
+      (!scopeRect || containsResultRegion(scopeRect, result.rect));
+    const existingPage = manifest.results.filter(inScope);
+    const otherResults = manifest.results.filter((result) => !inScope(result));
+    if (scopeRect) {
+      // A manually moved result outside the selection must not be duplicated or changed.
+      const outsideFingerprints = new Set(
+        otherResults.map(getFigureResultFingerprint),
+      );
+      const filtered = entries.filter(
+        (entry) => !outsideFingerprints.has(entry.fingerprint),
+      );
+      duplicateCandidates += entries.length - filtered.length;
+      entries = filtered;
+      if (entries.length === 0) {
+        return {
+          created: 0,
+          removed: 0,
+          skipped: duplicateCandidates,
+          results: manifest.results.map((result) =>
+            this.withImagePath(item, result),
+          ),
+        };
+      }
+    }
     const existingByFingerprint = new Map(
       existingPage.map((result) => [
         getFigureResultFingerprint(result),

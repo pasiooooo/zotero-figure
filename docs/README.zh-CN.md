@@ -2,6 +2,8 @@
 
 在 Zotero 中提取 PDF 里的图、表和公式。
 
+本分支基于 [MuiseDestiny/zotero-figure](https://github.com/MuiseDestiny/zotero-figure)。1.1.0 的完整改动见[更新日志](../CHANGELOG.md)，标签自动发布流程见[发布说明](RELEASING.md)。
+
 [English](../README.md) | [简体中文](README.zh-CN.md) | [Italiano](README.it-IT.md) | [Русский](README.ru-RU.md) | [日本語](README.ja-JP.md) | [Español](README.es-ES.md)
 
 Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚注。PDF 读取、渲染和版面检测均在本机完成，所需模型已内置在插件中。
@@ -24,7 +26,7 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 ## 环境要求
 
 - Zotero 9 或 Zotero 10。
-- [最新版本](https://github.com/MuiseDestiny/zotero-figure/releases/latest)中的 Zotero Figure XPI。
+- [最新版本](https://github.com/pasiooooo/zotero-figure/releases/latest)中的 Zotero Figure XPI。
 - 仅公式 OCR 需要网络连接和 SiliconFlow API 密钥。
 
 不需要 Java 或 `pdffigures2.jar`。
@@ -38,8 +40,12 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 ## 功能入口
 
 - **PDF 阅读器：** 打开 PDF，点击左侧栏中的 Zotero Figure 图标，再选择“解析图、表和公式”。
+- **侧栏浏览：** 双击图注即可修改，无图注的结果也可双击补充，输入区随编辑窗口伸缩。无图注或图注无编号的结果排在最前面；有编号的图片、表格、公式按类型分组，再按完整编号自然排序，支持 `1.2`、`1-10` 等编号。点击侧栏顶部左起第二个按钮，打开最大化 Library，默认选中当前文献并收起底部悬浮栏。窗口沿用主 Library 的视图模式和完整结果，展开悬浮栏后可自由切换文献或清除初始筛选，Type 等其他筛选也照常可用。
+- **区域补识别：** 点击 Figure 侧栏的“框选区域识别”，立即进入截图式选区界面；在 PDF 单页内拖动框选，松开后识别，Esc 或右键取消。有图注时可一并框入。图、表缺少图注时，会额外检测一次本页来补充图注上下文，不导入框外图表。图注文字取自 PDF 文本层，扫描图注暂不进行 OCR。区域识别只保存本地结果，不创建 Zotero 批注。已有结果卡片也可右键“重新识别此区域”。仅替换完全落在框内的旧结果，框外结果不变；未检出内容时保留原结果。
 - **图表库：** 打开“工具 > PDF 图表库”，集中浏览不同文献的结果；双击卡片可打开源 PDF。
+- **图表库缩放：** 按住 Ctrl（Windows/Linux）或 Command（macOS）滚动鼠标滚轮，或按 `+`/`-`，以 10% 为步长调整图片大小（50%–200%）。最大化 Library 窗口同样支持，缩放比例与工具栏滑块同步。
 - **批量处理：** 在文库中选中文献条目或 PDF 附件，右键打开 `PDF Figure >`，可进行分析、写入笔记或创建标注。选中图片标注后选择“添加到 Figure”即可批量导入。
+  开始前会列出已有解析记录的 PDF，可选择重新分析并覆盖、跳过这些 PDF 并继续处理其余文件，或取消整批任务。解析成功但未找到结果的 PDF 也会记为已解析。
 - **设置：** 打开 PDF Figure 设置页，可管理内置模型、标注同步和 SiliconFlow 公式 OCR，也可直接打开图表库；使用“转换已有公式”可处理所有文库中尚未缓存的公式。
 
 ## 隐私
@@ -50,6 +56,6 @@ PDF 解析、渲染、版面检测和本地结果存储均留在当前设备。�
 
 ## 相关链接
 
-- [版本发布](https://github.com/MuiseDestiny/zotero-figure/releases)
-- [问题反馈](https://github.com/MuiseDestiny/zotero-figure/issues)
+- [版本发布](https://github.com/pasiooooo/zotero-figure/releases)
+- [问题反馈](https://github.com/pasiooooo/zotero-figure/issues)
 - [AGPL-3.0-or-later 许可证](../LICENSE)

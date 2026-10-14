@@ -12,6 +12,57 @@ export interface PinnedCardTransform extends Point {
   scale: number;
 }
 
+export function layoutPinnedCards(
+  sizes: readonly Size[],
+  area: Point & Size,
+  anchor: Point,
+): Array<Point & Size> {
+  if (!sizes.length) return [];
+  const width = Math.max(1, area.width);
+  const height = Math.max(1, area.height);
+  const gap = Math.min(
+    12,
+    width / (sizes.length * 2),
+    height / (sizes.length * 2),
+  );
+  const maxWidth = Math.max(1, ...sizes.map((size) => size.width));
+  const maxHeight = Math.max(1, ...sizes.map((size) => size.height));
+  let columns = 1;
+  let scale = 0;
+  for (let candidate = 1; candidate <= sizes.length; candidate++) {
+    const rows = Math.ceil(sizes.length / candidate);
+    const fit = Math.min(
+      1,
+      (width - gap * (candidate - 1)) / (candidate * maxWidth),
+      (height - gap * (rows - 1)) / (rows * maxHeight),
+    );
+    if (fit > scale) {
+      columns = candidate;
+      scale = fit;
+    }
+  }
+  const rows = Math.ceil(sizes.length / columns);
+  const cellWidth = maxWidth * scale;
+  const cellHeight = maxHeight * scale;
+  const x = Math.max(
+    area.x,
+    Math.min(
+      anchor.x,
+      area.x + width - columns * cellWidth - (columns - 1) * gap,
+    ),
+  );
+  const y = Math.max(
+    area.y,
+    Math.min(anchor.y, area.y + height - rows * cellHeight - (rows - 1) * gap),
+  );
+  return sizes.map((_size, index) => ({
+    x: x + (index % columns) * (cellWidth + gap),
+    y: y + Math.floor(index / columns) * (cellHeight + gap),
+    width: cellWidth,
+    height: cellHeight,
+  }));
+}
+
 export function clampPinnedCardTransform(
   transform: PinnedCardTransform,
   cardSize: Size,

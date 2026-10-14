@@ -7,6 +7,8 @@ import {
   type PinnedCardTransform,
   type Size,
 } from "../../domain/pinnedFigureCard";
+import { getString } from "../../utils/locale";
+import { createFigureSidebarIcon } from "./figureSidebarIcons";
 
 const CARD_MARGIN = 12;
 const MAX_SCALE = 3;
@@ -21,6 +23,7 @@ const SCALE_EPSILON = 0.0005;
 const PINNED_LATEX_FONT_SIZE_PROPERTY = "--zoterofigure-pinned-latex-font-size";
 
 export interface PinnedFigureCard {
+  fitTo(bounds: Point & Size): void;
   cancelPendingSnapshotRefresh(): void;
   dispose(): void;
   element: HTMLElement;
@@ -46,6 +49,7 @@ export interface PinnedCardSourceGeometry {
 }
 
 interface BindPinnedFigureCardOptions {
+  position?: Point;
   element: HTMLElement;
   onActivate(): void;
   onClose(): void;
@@ -186,9 +190,10 @@ export function bindPinnedFigureCard(
     width: baseBounds.width,
   };
   const baseCardWidth = element.offsetWidth || initialCardSize.width;
+  let layoutScale = 1;
   const getCardSize = (): Size => ({
-    height: element.offsetHeight || initialCardSize.height,
-    width: element.offsetWidth || initialCardSize.width,
+    height: (element.offsetHeight || initialCardSize.height) * layoutScale,
+    width: (element.offsetWidth || initialCardSize.width) * layoutScale,
   });
   const getCardSizeAtScale = (scale: number): Size => {
     const previousWidth = element.style.width;
@@ -225,7 +230,7 @@ export function bindPinnedFigureCard(
     );
     return { ...clamped, scale: value.scale };
   };
-  const initialPosition: Point = {
+  const initialPosition: Point = options.position ?? {
     x: sourceGeometry.right + CARD_MARGIN + stagger,
     y: sourceGeometry.top + stagger,
   };
@@ -241,10 +246,39 @@ export function bindPinnedFigureCard(
   let dragMoved = false;
   let suppressNextClick = false;
   let suppressClickTimerID: number | undefined;
+  let pinned = false;
+  let selectedForClose = false;
+  const setSelectedForClose = (selected: boolean): void => {
+    selectedForClose = selected;
+    element.classList.toggle("is-selected", selected);
+  };
+  const pinButton = document.createElement("button");
+  pinButton.type = "button";
+  pinButton.className = "zoterofigure-card-menu zoterofigure-card-pin";
+  pinButton.append(createFigureSidebarIcon(document, "pin"));
+  const updatePinButton = (): void => {
+    const label = getString(
+      pinned ? "sidebar-unpin-floating" : "sidebar-pin-floating",
+    );
+    pinButton.title = label;
+    pinButton.setAttribute("aria-label", label);
+    pinButton.setAttribute("aria-pressed", String(pinned));
+    element.classList.toggle("is-pinned", pinned);
+  };
+  pinButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    pinned = !pinned;
+    setSelectedForClose(false);
+    updatePinButton();
+    onActivate();
+  });
+  updatePinButton();
+  element.querySelector(".zoterofigure-card-end")?.prepend(pinButton);
 
   const renderTransform = (value: PinnedCardTransform): void => {
     const styles = getPinnedCardRenderStyles(value, baseCardWidth);
-    element.style.transform = styles.transform;
+    element.style.transformOrigin = "top left";
+    element.style.transform = `${styles.transform} scale(${layoutScale})`;
     element.style.width = styles.width;
     element.style.setProperty(
       PINNED_LATEX_FONT_SIZE_PROPERTY,
@@ -389,15 +423,32 @@ export function bindPinnedFigureCard(
     });
     animateToClampedTransform();
   };
-  const handleDoubleClick = (event: MouseEvent): void => {
+  const handleSelectionPointerDown = (event: PointerEvent): void => {
     const target = event.target as Element | null;
-    if (target?.closest("button, a, input, select, textarea")) return;
-    event.preventDefault();
-    event.stopPropagation();
-    onClose();
+    setSelectedForClose(
+      pinned &&
+        event.button === 0 &&
+        element.contains(target) &&
+        !target?.closest("button, a, input, select, textarea"),
+    );
   };
+  const clearSelection = (): void => setSelectedForClose(false);
   const handleKeyDown = (event: KeyboardEvent): void => {
+    if (
+      pinned &&
+      event.target === element &&
+      (event.key === " " || event.key === "Enter")
+    ) {
+      event.preventDefault();
+      setSelectedForClose(true);
+      return;
+    }
     if (event.key !== "Escape") return;
+    if (
+      pinned &&
+      (!selectedForClose || !element.contains(event.target as Node | null))
+    )
+      return;
     event.preventDefault();
     event.stopPropagation();
     onClose();
@@ -411,14 +462,46 @@ export function bindPinnedFigureCard(
   element.addEventListener("pointerup", stopDragging);
   element.addEventListener("pointercancel", stopDragging);
   element.addEventListener("lostpointercapture", stopDragging);
+  element.addEventListener("focusout", (event) => {
+    if (!element.contains(event.relatedTarget as Node | null)) clearSelection();
+  });
   media.addEventListener("wheel", handleWheel, { passive: false });
-  element.addEventListener("dblclick", handleDoubleClick);
-  element.addEventListener("keydown", handleKeyDown);
+  const dismissalDocuments = new Set<Document>();
+  const observeDocument = (target: Document): void => {
+    if (dismissalDocuments.has(target)) return;
+    dismissalDocuments.add(target);
+    target.addEventListener("pointerdown", handleSelectionPointerDown, true);
+    target.addEventListener("keydown", handleKeyDown, true);
+    target.defaultView?.addEventListener("blur", clearSelection);
+  };
+  observeDocument(document);
+  observeDocument(ownerWindow.document);
+  const frames: HTMLIFrameElement[] = [];
+  document
+    .querySelectorAll<HTMLIFrameElement>("iframe")
+    .forEach((frame) => frames.push(frame));
+  const observeFrames = (): void => {
+    for (const frame of frames) {
+      if (frame.contentDocument) observeDocument(frame.contentDocument);
+    }
+  };
+  for (const frame of frames) frame.addEventListener("load", observeFrames);
+  observeFrames();
   view?.addEventListener("resize", clampToViewport);
   applyTransformImmediately();
 
   let disposed = false;
   return {
+    fitTo: (bounds) => {
+      adoptRenderedTransform();
+      layoutScale = Math.min(
+        1,
+        bounds.width / (element.offsetWidth || initialCardSize.width),
+        bounds.height / (element.offsetHeight || initialCardSize.height),
+      );
+      transform = { ...transform, x: bounds.x, y: bounds.y };
+      clampToViewport();
+    },
     cancelPendingSnapshotRefresh: () => snapshots.cancelPendingRefresh(),
     element,
     refreshSnapshot: (prepare) => snapshots.refresh(prepare),
@@ -429,6 +512,17 @@ export function bindPinnedFigureCard(
         ownerWindow.clearTimeout(suppressClickTimerID);
       }
       cancelTransformAnimation();
+      for (const target of dismissalDocuments) {
+        target.removeEventListener(
+          "pointerdown",
+          handleSelectionPointerDown,
+          true,
+        );
+        target.removeEventListener("keydown", handleKeyDown, true);
+        target.defaultView?.removeEventListener("blur", clearSelection);
+      }
+      for (const frame of frames)
+        frame.removeEventListener("load", observeFrames);
       view?.removeEventListener("resize", clampToViewport);
       element.remove();
       snapshots.dispose();

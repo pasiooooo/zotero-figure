@@ -8,6 +8,8 @@ import {
 } from "../src/features/reader/figureSidebarPanel";
 import type { ResultCorrectionPreview } from "../src/features/reader/resultRegionEditor";
 
+const testGlobals = globalThis as typeof globalThis & { addon: typeof addon };
+
 interface PanelInternals {
   openCommentEditor(result: StoredFigureResult): Promise<void>;
   openRegionEditor(result: StoredFigureResult): Promise<void>;
@@ -83,6 +85,107 @@ test("applies editor results while keeping their Panel outcomes separate", async
   assert.equal(reloads, 1);
   internals.document = undefined;
   panel.dispose();
+});
+
+test("double-clicking populated, translated or empty captions edits the current original result", async () => {
+  const previousAddon = testGlobals.addon;
+  testGlobals.addon = { data: {} } as typeof addon;
+  try {
+    const panel = createPanel(async () => createPreview());
+    const state = panel as unknown as {
+      results: StoredFigureResult[];
+      createComment(
+        document: Document,
+        result: StoredFigureResult,
+        display: string,
+      ): HTMLElement;
+      openCommentEditor(result: StoredFigureResult): Promise<void>;
+      setCommentExpansion(): void;
+    };
+    const original = createResult("original");
+    const current = { ...original, comment: "Figure 1.2. Current original" };
+    state.results = [current];
+    const edited: StoredFigureResult[] = [];
+    let expansions = 0;
+    state.openCommentEditor = async (result) => {
+      edited.push(result);
+    };
+    state.setCommentExpansion = () => expansions++;
+    for (const text of [original.comment, "Translated caption", ""]) {
+      const handlers = new Map<string, (event: unknown) => void>();
+      const document = {
+        createElement: () => ({
+          append() {},
+          setAttribute() {},
+          classList: { add() {}, toggle() {}, contains: () => false },
+          addEventListener: (
+            name: string,
+            listener: (event: unknown) => void,
+          ) => handlers.set(name, listener),
+        }),
+      } as unknown as Document;
+      state.createComment(document, original, text);
+      let stopped = 0;
+      const event = {
+        detail: 1,
+        preventDefault() {},
+        stopPropagation() {
+          stopped++;
+        },
+      };
+      handlers.get("click")!(event);
+      handlers.get("click")!({ ...event, detail: 2 });
+      assert.equal(edited.length, text === original.comment ? 0 : text ? 1 : 2);
+      handlers.get("dblclick")!(event);
+      await Promise.resolve();
+      assert.equal(edited.at(-1), current);
+      assert.equal(stopped, 3);
+    }
+    assert.equal(expansions, 2);
+    assert.equal(edited.length, 3);
+    panel.dispose();
+  } finally {
+    testGlobals.addon = previousAddon;
+  }
+});
+
+test("caption edits reorder existing cards and selection order without replacing their nodes", () => {
+  const panel = createPanel(async () => createPreview());
+  const state = panel as unknown as {
+    results: StoredFigureResult[];
+    resultCards: Map<string, HTMLElement>;
+    panel: HTMLElement;
+    imageLoads: { updateResult(): void };
+    refreshControls(): void;
+    applyUpdatedResult(result: StoredFigureResult): void;
+  };
+  const first = { ...createResult("first"), comment: "Fig 1.1" };
+  const second = { ...createResult("second"), comment: "Fig 1.2" };
+  state.results = [first, second];
+  const card = () =>
+    ({
+      querySelector: () => null,
+      ownerDocument: {},
+    }) as unknown as HTMLElement;
+  const firstCard = card();
+  const secondCard = card();
+  state.resultCards = new Map([
+    [first.id, firstCard],
+    [second.id, secondCard],
+  ]);
+  const appended: HTMLElement[] = [];
+  state.panel = {
+    querySelector: () => ({
+      append: (node: HTMLElement) => appended.push(node),
+    }),
+  } as unknown as HTMLElement;
+  state.imageLoads = { updateResult() {} };
+  state.refreshControls = () => {};
+  state.applyUpdatedResult({ ...first, comment: "Fig 2.1" });
+  assert.deepEqual([...state.resultCards.keys()], ["second", "first"]);
+  assert.deepEqual(appended, [secondCard, firstCard]);
+  state.applyUpdatedResult({ ...first, comment: "" });
+  assert.deepEqual([...state.resultCards.keys()], ["first", "second"]);
 });
 
 test("disposes only pinned cards whose results no longer exist", () => {
@@ -402,6 +505,543 @@ test("passes displayed translations to single and bulk note exports", async () =
   panel.dispose();
 });
 
+interface SelectionInternals {
+  active: boolean;
+  batchBusy: boolean;
+  batchStatus?: string;
+  document?: Document;
+  panel?: HTMLElement;
+  panelContent?: HTMLDivElement;
+  results: StoredFigureResult[];
+  resultCards: Map<string, HTMLElement>;
+  selectedResultIDs: Set<string>;
+  selectResult(
+    id: string,
+    modifiers: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
+  ): void;
+  handleSelectionKeyDown(event: KeyboardEvent): void;
+  runSelectedBatch(action: "delete" | "export"): Promise<void>;
+  render(): void;
+  renderContent(): void;
+  loadingResults: boolean;
+  requestResults(content: HTMLDivElement, force?: boolean): void;
+}
+
+function selectionPanel(overrides: Partial<FigureSidebarPanelOptions> = {}) {
+  const panel = createPanel(async () => createPreview(), overrides);
+  const state = panel as unknown as SelectionInternals;
+  state.active = true;
+  state.document = {} as Document;
+  state.panel = {
+    contains: (target: unknown) => Boolean(target),
+  } as HTMLElement;
+  state.panelContent = { inert: false } as HTMLDivElement;
+  state.results = ["figure", "formula", "table"].map((kind) => ({
+    ...createResult(kind),
+    kind: kind as StoredFigureResult["kind"],
+  }));
+  for (const { id } of state.results)
+    state.resultCards.set(id, {
+      classList: { toggle: () => {} },
+      setAttribute: () => {},
+    } as unknown as HTMLElement);
+  state.render = () => {};
+  return state;
+}
+
+function selectionKey(
+  key: string,
+  options: Partial<KeyboardEvent> = {},
+): KeyboardEvent {
+  return {
+    key,
+    target: { closest: () => null },
+    ctrlKey: false,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    repeat: false,
+    defaultPrevented: false,
+    preventDefault() {},
+    stopPropagation() {},
+    ...options,
+  } as unknown as KeyboardEvent;
+}
+
+test("sidebar selection supports click, Ctrl toggle, Shift ranges, and scoped keyboard shortcuts", () => {
+  const state = selectionPanel();
+  const plain = { ctrlKey: false, metaKey: false, shiftKey: false };
+  state.selectResult("figure", plain);
+  state.selectResult("table", { ...plain, shiftKey: true });
+  assert.deepEqual(
+    [...state.selectedResultIDs],
+    ["figure", "formula", "table"],
+  );
+  state.selectResult("formula", { ...plain, ctrlKey: true });
+  assert.deepEqual([...state.selectedResultIDs], ["figure", "table"]);
+  state.selectResult("table", plain);
+  assert.deepEqual([...state.selectedResultIDs], ["table"]);
+  state.handleSelectionKeyDown(selectionKey("a", { ctrlKey: true }));
+  assert.equal(state.selectedResultIDs.size, 3);
+  state.handleSelectionKeyDown(selectionKey("Escape"));
+  assert.equal(state.selectedResultIDs.size, 0);
+  const editor = { closest: () => ({}) } as unknown as EventTarget;
+  state.handleSelectionKeyDown(
+    selectionKey("a", { ctrlKey: true, target: editor }),
+  );
+  state.handleSelectionKeyDown(
+    selectionKey("a", { ctrlKey: true, target: null }),
+  );
+  assert.equal(state.selectedResultIDs.size, 0);
+  state.selectResult("figure", plain);
+  let deletions = 0;
+  state.runSelectedBatch = async () => {
+    deletions++;
+  };
+  state.handleSelectionKeyDown(selectionKey("Delete", { repeat: true }));
+  state.handleSelectionKeyDown(selectionKey("Delete", { target: editor }));
+  assert.equal(deletions, 0);
+  state.handleSelectionKeyDown(selectionKey("Delete"));
+  assert.equal(deletions, 1);
+});
+
+test("sidebar deletion confirms kind counts, handles cancellation and retains failed selections", async () => {
+  const previousAddon = testGlobals.addon;
+  const prompts: unknown[] = [];
+  testGlobals.addon = {
+    data: {
+      locale: {
+        current: {
+          formatMessagesSync: (
+            messages: Array<{ id: string; args: unknown }>,
+          ) => {
+            if (messages[0].id.endsWith("gallery-confirm-delete"))
+              prompts.push(messages[0].args);
+            return [{ value: messages[0].id }];
+          },
+        },
+      },
+    },
+  } as unknown as typeof addon;
+  try {
+    let allow = false;
+    let calls = 0;
+    const state = selectionPanel({
+      ownerWindow: { confirm: () => allow } as unknown as Window,
+      onRunBatch: async (ids, action) => {
+        calls++;
+        assert.equal(state.panelContent!.inert, true);
+        assert.equal(action, "delete");
+        assert.deepEqual(ids, ["figure", "formula", "table"]);
+        return {
+          completedIDs: ["figure", "table"],
+          errors: ["formula: read-only"],
+        };
+      },
+    });
+    state.selectedResultIDs = new Set(["figure", "formula", "table"]);
+    const body = {} as HTMLElement;
+    const document = { body, activeElement: {} as Element };
+    state.document = document as Document;
+    state.render = () => {
+      document.activeElement = body;
+    };
+    let focusRestored = 0;
+    state.resultCards.get("formula")!.focus = () => {
+      focusRestored++;
+    };
+    await state.runSelectedBatch("delete");
+    assert.equal(calls, 0);
+    assert.equal(state.batchBusy, false);
+    allow = true;
+    await state.runSelectedBatch("delete");
+    assert.equal(calls, 1);
+    assert.deepEqual(
+      prompts,
+      Array(2).fill({ count: 3, figures: 1, formulae: 1, tables: 1 }),
+    );
+    assert.deepEqual(
+      state.results.map(({ id }) => id),
+      ["formula"],
+    );
+    assert.deepEqual([...state.selectedResultIDs], ["formula"]);
+    assert.match(state.batchStatus!, /formula: read-only/);
+    assert.equal(state.panelContent!.inert, false);
+    assert.equal(state.batchBusy, false);
+    assert.equal(focusRestored, 1);
+  } finally {
+    testGlobals.addon = previousAddon;
+  }
+});
+
+test("sidebar batches ignore stale refreshes and reload once after completion", async () => {
+  const previousAddon = testGlobals.addon;
+  testGlobals.addon = { data: {} } as typeof addon;
+  try {
+    const stale = createDeferred<StoredFigureResult[]>();
+    const batch = createDeferred<{
+      completedIDs: string[];
+      errors: string[];
+    }>();
+    let loads = 0;
+    const state = selectionPanel({
+      getResults: () => (++loads === 1 ? stale.promise : Promise.resolve([])),
+      ownerWindow: { confirm: () => true } as unknown as Window,
+      onRunBatch: () => batch.promise,
+    });
+    state.renderContent = () => {};
+    state.selectedResultIDs.add("figure");
+    state.requestResults(state.panelContent!);
+    const pending = state.runSelectedBatch("delete");
+    state.requestResults(state.panelContent!, true);
+    stale.resolve([createResult("stale")]);
+    await Promise.resolve();
+    assert.equal(
+      state.results.some(({ id }) => id === "stale"),
+      false,
+    );
+    assert.equal(loads, 1);
+    batch.resolve({ completedIDs: ["figure"], errors: [] });
+    await pending;
+    assert.equal(loads, 2);
+  } finally {
+    testGlobals.addon = previousAddon;
+  }
+});
+
+test("sidebar media navigates on double click and floats only when dragged outside the panel", () => {
+  const panel = createPanel(async () => createPreview());
+  const state = panel as unknown as {
+    panel: HTMLElement;
+    bindCardMediaInteractions(
+      media: HTMLElement,
+      result: StoredFigureResult,
+      card: HTMLElement,
+    ): void;
+    goToPage(): Promise<void>;
+    pinSelectedCards(
+      result: StoredFigureResult,
+      card: HTMLElement,
+      position: { x: number; y: number },
+    ): Promise<void>;
+  };
+  let navigations = 0;
+  const drops: Array<{ x: number; y: number }> = [];
+  state.goToPage = async () => {
+    navigations++;
+  };
+  state.pinSelectedCards = async (_result, _card, position) => {
+    drops.push(position);
+  };
+  state.panel = {
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 200, bottom: 600 }),
+  } as HTMLElement;
+  const handlers = new Map<string, (event: unknown) => void>();
+  const media = {
+    addEventListener: (name: string, handler: (event: unknown) => void) =>
+      handlers.set(name, handler),
+    setPointerCapture() {},
+    hasPointerCapture: () => true,
+    releasePointerCapture() {},
+    classList: { add() {}, remove() {} },
+  } as unknown as HTMLElement;
+  state.bindCardMediaInteractions(
+    media,
+    createResult("figure"),
+    {} as HTMLElement,
+  );
+  const emit = (type: string, x = 100, y = 100) =>
+    handlers.get(type)?.({
+      type,
+      button: 0,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: x,
+      clientY: y,
+      preventDefault() {},
+      stopPropagation() {},
+    });
+  emit("click");
+  assert.equal(navigations, 0);
+  emit("dblclick");
+  assert.equal(navigations, 1);
+  emit("pointerdown");
+  emit("pointermove", 150);
+  emit("pointerup", 150);
+  assert.equal(drops.length, 0);
+  emit("pointerdown");
+  emit("pointermove", 300);
+  emit("pointercancel", 300);
+  assert.equal(drops.length, 0);
+  emit("pointerdown");
+  emit("pointermove", 300, 200);
+  emit("pointerup", 300, 200);
+  assert.deepEqual(drops, [{ x: 268, y: 180 }]);
+  emit("lostpointercapture", 300, 200);
+  assert.equal(drops.length, 1);
+});
+
+test("dragging a selected result floats the selection in list order, continues on failure, and isolates an unselected drag", async () => {
+  const previousZotero = globalThis.Zotero;
+  globalThis.Zotero = { logError() {} } as unknown as typeof Zotero;
+  try {
+    const state = selectionPanel() as SelectionInternals & {
+      pinGeneration: number;
+      pinSelectedCards(
+        result: StoredFigureResult,
+        card: HTMLElement,
+        position?: { x: number; y: number },
+      ): Promise<void>;
+      pinCard(
+        result: StoredFigureResult,
+        card: HTMLElement,
+        position?: { x: number; y: number },
+      ): Promise<void>;
+    };
+    state.selectedResultIDs = new Set(["table", "figure", "formula"]);
+    const calls: string[] = [];
+    state.pinCard = async (result, card, position) => {
+      calls.push(result.id);
+      assert.equal(card, state.resultCards.get(result.id));
+      assert.deepEqual(position, { x: 400, y: 200 });
+      if (result.id === "formula") throw new Error("image unavailable");
+    };
+    await state.pinSelectedCards(
+      state.results[1],
+      state.resultCards.get("formula")!,
+      { x: 400, y: 200 },
+    );
+    assert.deepEqual(calls, ["figure", "formula", "table"]);
+    assert.equal(state.selectedResultIDs.size, 3);
+    assert.match(state.batchStatus!, /image unavailable/);
+    state.selectedResultIDs = new Set(["figure"]);
+    calls.length = 0;
+    await state.pinSelectedCards(
+      state.results[2],
+      state.resultCards.get("table")!,
+      { x: 400, y: 200 },
+    );
+    assert.deepEqual(calls, ["table"]);
+    state.selectedResultIDs = new Set(["figure", "formula", "table"]);
+    calls.length = 0;
+    state.pinCard = async (result) => {
+      calls.push(result.id);
+      state.pinGeneration++;
+    };
+    await state.pinSelectedCards(
+      state.results[0],
+      state.resultCards.get("figure")!,
+    );
+    assert.deepEqual(calls, ["figure"]);
+  } finally {
+    globalThis.Zotero = previousZotero;
+  }
+});
+
+test("batch floating arranges only new cards; later single drags and existing selections never rearrange them", async () => {
+  const state = selectionPanel() as SelectionInternals & {
+    pinnedCards: Map<
+      string,
+      {
+        element: { offsetWidth: number; offsetHeight: number };
+        fitTo(cell: {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+        }): void;
+      }
+    >;
+    pinSelectedCards(
+      result: StoredFigureResult,
+      card: HTMLElement,
+      position?: { x: number; y: number },
+    ): Promise<void>;
+    pinCard(
+      result: StoredFigureResult,
+      card: HTMLElement,
+      position?: { x: number; y: number },
+    ): Promise<unknown>;
+  };
+  state.document = {
+    documentElement: { clientWidth: 1200, clientHeight: 800 },
+  } as Document;
+  state.panel = {
+    getBoundingClientRect: () => ({ right: 300 }),
+  } as HTMLElement;
+  const positions: Array<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }> = [];
+  state.pinnedCards.set("figure", {
+    element: { offsetWidth: 300, offsetHeight: 250 },
+    fitTo: () => assert.fail("an existing card must never be moved or resized"),
+  });
+  state.pinCard = async (result) => {
+    if (state.pinnedCards.has(result.id)) return;
+    state.pinnedCards.set(result.id, {
+      element: { offsetWidth: 300, offsetHeight: 250 },
+      fitTo: (cell) => positions.push(cell),
+    });
+    return state.pinnedCards.get(result.id);
+  };
+  state.selectedResultIDs = new Set(["figure", "formula", "table"]);
+  await state.pinSelectedCards(
+    state.results[0],
+    state.resultCards.get("figure")!,
+    { x: 1100, y: 750 },
+  );
+  assert.equal(positions.length, 2);
+  assert.ok(positions.every(({ x }) => x >= 312));
+  assert.equal(new Set(positions.map(({ x, y }) => `${x}:${y}`)).size, 2);
+  await state.pinSelectedCards(
+    state.results[0],
+    state.resultCards.get("figure")!,
+    { x: 500, y: 300 },
+  );
+  assert.equal(positions.length, 2);
+  state.pinnedCards.delete("table");
+  state.selectedResultIDs = new Set(["table"]);
+  await state.pinSelectedCards(
+    state.results[2],
+    state.resultCards.get("table")!,
+    { x: 800, y: 200 },
+  );
+  assert.equal(positions.length, 2);
+});
+
+test("sidebar right click preserves multi-selection and also opens from list whitespace", () => {
+  const state = selectionPanel() as SelectionInternals & {
+    handlePanelContextMenu(event: MouseEvent): void;
+    openMenu(
+      anchor: HTMLButtonElement,
+      result: StoredFigureResult,
+      event?: MouseEvent,
+    ): void;
+  };
+  const opened: string[] = [];
+  let prevented = 0;
+  let stopped = 0;
+  const anchors = new Map<string, HTMLButtonElement>();
+  for (const [id, card] of state.resultCards) {
+    anchors.set(id, {} as HTMLButtonElement);
+    Object.assign(card, {
+      dataset: { resultId: id },
+      focus() {},
+      querySelector: () => anchors.get(id),
+    });
+  }
+  state.openMenu = (anchor, result) => {
+    assert.equal(anchor, anchors.get(result.id));
+    opened.push(result.id);
+  };
+  state.selectedResultIDs = new Set(["figure", "formula"]);
+  const rightClick = (id?: string, editable = false) =>
+    state.handlePanelContextMenu({
+      target: {
+        closest: (selector: string) =>
+          selector === ".zoterofigure-sidebar-card"
+            ? state.resultCards.get(id ?? "")
+            : editable
+              ? {}
+              : null,
+      },
+      preventDefault: () => {
+        prevented++;
+      },
+      stopPropagation: () => {
+        stopped++;
+      },
+    } as unknown as MouseEvent);
+  rightClick("formula");
+  assert.deepEqual([...state.selectedResultIDs], ["figure", "formula"]);
+  rightClick();
+  rightClick("formula", true);
+  assert.deepEqual(opened, ["formula", "figure"]);
+  rightClick("table");
+  assert.deepEqual([...state.selectedResultIDs], ["table"]);
+  assert.deepEqual(opened, ["formula", "figure", "table"]);
+  assert.equal(prevented, 3);
+  assert.equal(stopped, 3);
+});
+
+test("native sidebar batch menu opens after the context event and cancels stale opens", () => {
+  const previousAddon = testGlobals.addon;
+  testGlobals.addon = { data: {} } as typeof addon;
+  try {
+    const scheduled: Array<() => void> = [];
+    const labels: string[] = [];
+    const commands = new Map<string, () => void>();
+    const opened: number[][] = [];
+    const mounted: unknown[] = [];
+    const popupset = { append: (menu: unknown) => mounted.push(menu) };
+    const ownerWindow = {
+      document: {
+        createXULElement: () => ({
+          append() {},
+          remove() {},
+          setAttribute() {},
+          addEventListener() {},
+          openPopupAtScreen: (x: number, y: number) => opened.push([x, y]),
+        }),
+      },
+      setTimeout: (callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      },
+    } as unknown as Window;
+    const state = selectionPanel({
+      ownerWindow,
+      reader: { _popupset: popupset } as unknown as PdfReader,
+    }) as SelectionInternals & {
+      openMenu(
+        anchor: HTMLButtonElement,
+        result: StoredFigureResult,
+        event?: MouseEvent,
+      ): void;
+      closeMenu(): void;
+      appendMenuItem(menu: unknown, key: string, command: () => void): void;
+      pinSelectedCards(): Promise<void>;
+    };
+    const actions: string[] = [];
+    state.runSelectedBatch = async (action) => {
+      actions.push(action);
+    };
+    state.pinSelectedCards = async () => {
+      actions.push("float");
+    };
+    state.appendMenuItem = (_menu, key, command) => {
+      labels.push(key);
+      commands.set(key, command);
+    };
+    state.selectedResultIDs = new Set(["figure", "formula"]);
+    const anchor = {
+      closest: () => state.resultCards.get("figure"),
+    } as unknown as HTMLButtonElement;
+    const event = { screenX: 800, screenY: 400 } as MouseEvent;
+    state.openMenu(anchor, state.results[0], event);
+    assert.equal(mounted.length, 1);
+    assert.equal(opened.length, 0);
+    assert.ok(labels.includes("gallery-export-selected"));
+    assert.ok(labels.includes("gallery-delete-selected"));
+    assert.ok(labels.includes("sidebar-pin-image"));
+    scheduled.shift()!();
+    assert.deepEqual(opened, [[800, 400]]);
+    commands.get("gallery-export-selected")!();
+    commands.get("gallery-delete-selected")!();
+    commands.get("sidebar-pin-image")!();
+    assert.deepEqual(actions, ["export", "delete", "float"]);
+    state.openMenu(anchor, state.results[0], event);
+    state.closeMenu();
+    scheduled.shift()!();
+    assert.equal(opened.length, 1);
+  } finally {
+    testGlobals.addon = previousAddon;
+  }
+});
+
 function createPanel(
   onPrepareCorrection: FigureSidebarPanelOptions["onPrepareCorrection"],
   overrides: Partial<FigureSidebarPanelOptions> = {},
@@ -413,6 +1053,9 @@ function createPanel(
     onAddAllToNote: async () => {},
     onAddToNote: async () => {},
     onAnalyze: () => {},
+    onOpenGallery: () => {},
+    onSelectRegion: () => {},
+    onRecognizeRegion: async () => {},
     onCacheTranslations: async () => new Map(),
     onCancelAnalysis: () => {},
     onClear: async () => {},
@@ -432,6 +1075,7 @@ function createPanel(
           }
         : undefined,
     onRemove: async () => {},
+    onRunBatch: async () => ({ completedIDs: [], errors: [] }),
     onRerecognizeLatex: async (result) => result,
     onResultsDisplayed: () => {},
     onSaveImage: async () => {},

@@ -139,6 +139,7 @@ export class SidebarResultEditorController {
     this.closeDialog(previousDialog);
 
     const dialogData: CommentDialogData = { comment: result.comment };
+    const screen = context.defaultView?.screen;
     const dialog = this.createDialog()
       .setDialogData(dialogData)
       .addCell(0, 0, this.createCommentEditorCell())
@@ -146,9 +147,11 @@ export class SidebarResultEditorController {
       .addButton(this.formatString("sidebar-edit-comment-cancel"), "cancel")
       .open(this.formatString("sidebar-edit-comment-title"), {
         centerscreen: true,
-        fitContent: true,
+        fitContent: false,
+        height: getBoundedDialogDimension(screen?.availHeight, 420, 300, 420),
         noDialogMode: true,
         resizable: true,
+        width: getBoundedDialogDimension(screen?.availWidth, 640, 360, 640),
       });
     this.commentDialog = dialog;
     const handleLoad = (): void => {
@@ -378,8 +381,10 @@ export class SidebarResultEditorController {
         display: "flex",
         flexDirection: "column",
         gap: "8px",
-        minWidth: "420px",
-        width: "100%",
+        height: "calc(100vh - 72px)",
+        minHeight: "140px",
+        minWidth: "0",
+        width: "calc(100vw - 24px)",
       },
       children: [
         {
@@ -390,6 +395,7 @@ export class SidebarResultEditorController {
           },
           styles: {
             color: "var(--fill-secondary)",
+            flexShrink: "0",
             fontSize: "12px",
           },
         },
@@ -400,7 +406,7 @@ export class SidebarResultEditorController {
             "data-bind": "comment",
             "data-prop": "value",
             maxlength: COMMENT_EDITOR_MAX_LENGTH,
-            rows: 2,
+            rows: 6,
           },
           styles: {
             background: "var(--material-background)",
@@ -408,11 +414,10 @@ export class SidebarResultEditorController {
             borderRadius: "5px",
             boxSizing: "border-box",
             color: "var(--fill-primary)",
+            flex: "1",
             font: "inherit",
-            height: "4.1em",
             lineHeight: "1.45",
-            maxHeight: "4.1em",
-            minHeight: "4.1em",
+            minHeight: "0",
             overflowY: "auto",
             padding: "8px",
             resize: "none",

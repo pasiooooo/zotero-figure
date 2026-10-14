@@ -12,13 +12,18 @@ import {
   DEFAULT_FIGURE_RESULT_ANALYSIS_IDENTITY,
   FigureResultStore,
 } from "../src/services/results/figureResultStore";
-import type { PdfEngine } from "../src/services/pdf/pdfEngine";
+import type {
+  PdfEngine,
+  PdfAnalysisPageData,
+} from "../src/services/pdf/pdfEngine";
 import { RECOMMENDED_MODEL } from "../src/services/model/modelCatalog";
 import { modelManager } from "../src/services/model/modelManager";
 import { OperationCancelledError } from "../src/utils/cancellation";
 import { installMemoryIO } from "./helpers/memoryIO";
 
 class AnalyzerWorker {
+  public static results: LayoutElement[];
+  public static resultBatches: LayoutElement[][] = [];
   public static automatic = true;
   public static readonly instances: AnalyzerWorker[] = [];
   public onerror: ((event: ErrorEvent) => unknown) | null = null;
@@ -67,7 +72,7 @@ class AnalyzerWorker {
     if (this.respondedTasks.has(taskID)) return;
     this.respondedTasks.add(taskID);
     this.respond({
-      results: detectionResults,
+      results: AnalyzerWorker.resultBatches.shift() ?? AnalyzerWorker.results,
       taskID,
       timings: {
         decodeMs: 1,
@@ -93,6 +98,314 @@ const detectionResults: LayoutElement[] = [
     xyxy: [0.1, 0.82, 0.8, 0.95],
   },
 ];
+
+test("region recognition crops before detection and bypasses full-page text hints", async () => {
+  const harness = installAnalyzerHarness({
+    pageText: () => "ordinary text",
+    detections: [detectionResults[0]],
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    const outcome = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [20, 30, 80, 90],
+    );
+    assert.equal(outcome.results.created, 1);
+    assert.deepEqual(harness.renderedPages, [0]);
+    assert.deepEqual(harness.renderedRegionRects, [
+      [[20, 30, 80, 90]],
+      [[26, 42, 68, 78]],
+    ]);
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.tag, "Figure");
+    assert.deepEqual(result.rect, [26, 42, 68, 78]);
+    assert.equal(harness.annotationWrites(), 0);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region recognition extracts a detected caption with the normal matching pipeline", async () => {
+  const harness = installAnalyzerHarness({
+    pageData: {
+      chars: [{ c: "Figure 7. Regional caption", rect: [30, 34, 60, 38] }],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, [20, 30, 80, 90]);
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.comment, "Figure 7. Regional caption");
+    assert.equal(result.tag, "Figure 7");
+    assert.deepEqual(harness.renderedPages, []);
+    assert.equal(harness.worker().detectionMessages.length, 1);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region recognition recovers a nearby caption from full-page context without importing other subjects", async () => {
+  const harness = installAnalyzerHarness({
+    detectionBatches: [
+      [detectionResults[0]],
+      [
+        { score: 0.9, type: "figure_caption", xyxy: [0.2, 0.63, 0.7, 0.7] },
+        { score: 0.9, type: "table", xyxy: [0.8, 0.1, 0.98, 0.5] },
+      ],
+    ],
+    pageData: {
+      chars: [{ c: "Figure 8. Outside crop", rect: [30, 31, 60, 35] }],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    const prior = await store.reconcilePage(
+      harness.reader._item,
+      0,
+      [{ pageIndex: 0, rect: [1, 1, 10, 10], tag: "Table", comment: "keep" }],
+      [Uint8Array.of(1).buffer],
+      "replace-page",
+    );
+    const outcome = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [20, 40, 80, 90],
+    );
+    const results = await store.list(harness.reader._item);
+    assert.equal(results.length, 2);
+    assert.deepEqual(
+      results.find(({ id }) => id === prior.results[0].id),
+      prior.results[0],
+    );
+    const result = results.find(({ comment }) => comment !== "keep")!;
+    assert.equal(result.comment, "Figure 8. Outside crop");
+    assert.equal(result.tag, "Figure 8");
+    assert.deepEqual(result.rect, [26, 50, 68, 80]);
+    assert.deepEqual(harness.renderedPages, [0]);
+    assert.equal(harness.worker().detectionMessages.length, 2);
+    assert.equal(outcome.timings.inferenceMs, 6);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("caption recovery includes the table caption while retaining its cropped footnote", async () => {
+  const harness = installAnalyzerHarness({
+    detectionBatches: [
+      [
+        { score: 0.9, type: "table", xyxy: [0.1, 0.2, 0.8, 0.8] },
+        { score: 0.9, type: "table_footnote", xyxy: [0.1, 0.82, 0.8, 0.95] },
+      ],
+      [{ score: 0.9, type: "table_caption", xyxy: [0.2, 0.1, 0.7, 0.2] }],
+    ],
+    pageData: {
+      chars: [
+        { c: "Table 9. Values", rect: [30, 83, 60, 87] },
+        { c: "* footnote", rect: [30, 34, 60, 38] },
+      ],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, [20, 30, 80, 90]);
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.comment, "Table 9. Values\n\n* footnote");
+    assert.equal(result.tag, "Table 9");
+    assert.deepEqual(result.rect, [26, 33, 68, 78]);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region caption coordinates include a nonzero PDF CropBox origin", async () => {
+  const harness = installAnalyzerHarness({
+    pageData: {
+      chars: [{ c: "Figure 10. Offset", rect: [228, 334, 250, 338] }],
+      viewBox: [200, 300, 300, 400],
+      pdfToPage: [1, 0, 0, -1, -200, 400],
+      pageToPdf: [1, 0, 0, -1, 200, 400],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, [220, 330, 280, 390]);
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.comment, "Figure 10. Offset");
+    assert.equal(result.tag, "Figure 10");
+    assert.deepEqual(harness.renderedPages, []);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("caption recovery does not attach text from a different column", async () => {
+  const harness = installAnalyzerHarness({
+    detectionBatches: [
+      [detectionResults[0]],
+      [{ score: 0.9, type: "figure_caption", xyxy: [0.8, 0.63, 0.98, 0.7] }],
+    ],
+    pageData: {
+      chars: [{ c: "Figure 99. Other column", rect: [82, 31, 96, 35] }],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, [20, 40, 80, 90]);
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.comment, "");
+    assert.equal(result.tag, "Figure");
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("image-only pages retain uncaptioned region results without a text-recovery pass", async () => {
+  const harness = installAnalyzerHarness({
+    detections: [detectionResults[0]],
+    pageData: { chars: [] },
+  });
+  const analyzer = new LayoutAnalyzer(undefined, harness.pdfEngine, 1);
+  try {
+    const result = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [20, 40, 80, 90],
+    );
+    assert.equal(result.results.created, 1);
+    assert.deepEqual(harness.renderedPages, []);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("empty region detections preserve previous results and skip annotation mirroring", async () => {
+  const harness = installAnalyzerHarness({ detections: [] });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    const before = await store.reconcilePage(
+      harness.reader._item,
+      0,
+      [{ pageIndex: 0, rect: [10, 10, 20, 20], comment: "old", tag: "Figure" }],
+      [Uint8Array.of(1).buffer],
+      "replace-page",
+    );
+    const result = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [0, 0, 100, 100],
+      { syncAnnotations: true },
+    );
+    assert.equal(result.results.removed, 0);
+    assert.deepEqual(await store.list(harness.reader._item), before.results);
+    assert.equal(harness.annotationWrites(), 0);
+    assert.equal(harness.renderedRegionRects.length, 1);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region recognition validates bounds and releases leases after failure", async () => {
+  const harness = installAnalyzerHarness();
+  const analyzer = new LayoutAnalyzer(undefined, harness.pdfEngine, 1);
+  try {
+    await assert.rejects(
+      analyzer.analyzeRegion(harness.reader._item, 0, [NaN, 0, 10, 10]),
+      /Invalid recognition region/,
+    );
+    await assert.rejects(
+      analyzer.analyzeRegion(harness.reader._item, 1, [0, 0, 10, 10]),
+      /Invalid recognition page/,
+    );
+    await assert.rejects(
+      analyzer.analyzeRegion(harness.reader._item, 0, [110, 0, 120, 10]),
+      /outside/,
+    );
+    const outcome = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [-10, -10, 110, 110],
+    );
+    assert.equal(outcome.results.created, 1);
+    assert.deepEqual(harness.renderedRegionRects[0], [[0, 0, 100, 100]]);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("cancelling region recognition leaves existing results intact", async () => {
+  const harness = installAnalyzerHarness({ automatic: false });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  const controller = new AbortController();
+  try {
+    const operation = analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [0, 0, 100, 100],
+      { signal: controller.signal },
+    );
+    const rejected = assert.rejects(operation, OperationCancelledError);
+    await waitFor(() =>
+      AnalyzerWorker.instances.some(
+        (worker) => worker.detectionMessages.length > 0,
+      ),
+    );
+    controller.abort();
+    await rejected;
+    assert.deepEqual(await store.list(harness.reader._item), []);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region annotation mirroring retains other results on the page", async () => {
+  const harness = installAnalyzerHarness({ allowAnnotations: true });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await store.reconcilePage(
+      harness.reader._item,
+      0,
+      [
+        {
+          pageIndex: 0,
+          rect: [1, 1, 10, 10],
+          comment: "outside",
+          tag: "Table",
+        },
+      ],
+      [Uint8Array.of(1).buffer],
+      "replace-page",
+    );
+    await analyzer.analyzeRegion(harness.reader._item, 0, [20, 30, 80, 90], {
+      syncAnnotations: true,
+    });
+    assert.equal((await store.list(harness.reader._item)).length, 2);
+    assert.equal(harness.annotationComments().includes("outside"), false);
+    assert.equal(harness.annotationWrites(), 1);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
 
 test("analysis renders one high-resolution page for all local previews", async () => {
   const harness = installAnalyzerHarness();
@@ -377,6 +690,71 @@ test("maps a corrected preview rectangle back to PDF coordinates", async () => {
   }
 });
 
+for (const duplicateMode of ["replace-page", "skip-existing"] as const) {
+  test(`records an empty completed analysis in ${duplicateMode} mode`, async () => {
+    const harness = installAnalyzerHarness({ pageText: () => "ordinary text" });
+    const store = new FigureResultStore();
+    const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+    try {
+      assert.equal(await store.hasAnalysis(harness.reader._item), false);
+      await analyzer.analyze(
+        harness.reader,
+        { update() {} },
+        { duplicateMode },
+      );
+      assert.equal(await store.hasAnalysis(harness.reader._item), true);
+      assert.deepEqual(await store.list(harness.reader._item), []);
+    } finally {
+      analyzer.dispose();
+      harness.restore();
+    }
+  });
+}
+
+test("explicit replacement overrides skip-existing preference and prunes obsolete results", async () => {
+  const harness = installAnalyzerHarness({ duplicateMode: "skip-existing" });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    const stale = {
+      comment: "Figure 9. Obsolete",
+      pageIndex: 0,
+      rect: [1, 2, 10, 12] as Rect,
+      tag: "Figure 9",
+    };
+    await store.reconcilePage(
+      harness.reader._item,
+      0,
+      [stale],
+      [Uint8Array.of(1).buffer],
+      "replace-page",
+    );
+    await store.reconcilePage(
+      harness.reader._item,
+      3,
+      [{ ...stale, pageIndex: 3 }],
+      [Uint8Array.of(2).buffer],
+      "replace-page",
+    );
+    await analyzer.analyze(
+      harness.reader,
+      { update() {} },
+      { duplicateMode: "replace-page" },
+    );
+    const results = await store.list(harness.reader._item);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].tag, "Figure 1");
+    assert.equal(results[0].pageIndex, 0);
+    assert.equal(
+      Zotero.Prefs.get("extensions.zotero.zoterofigure.duplicateMode"),
+      "skip-existing",
+    );
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
 test("removes results from heuristic-skipped and no-longer-present pages", async () => {
   const harness = installAnalyzerHarness({
     pageCount: 2,
@@ -628,6 +1006,10 @@ test("cancels active and permit-waiting pages as OperationCancelledError", async
 });
 
 interface AnalyzerHarnessOptions {
+  duplicateMode?: "replace-page" | "skip-existing";
+  detections?: LayoutElement[];
+  detectionBatches?: LayoutElement[][];
+  pageData?: Partial<PdfAnalysisPageData>;
   allowAnnotations?: boolean;
   automatic?: boolean;
   pageCount?: number;
@@ -667,6 +1049,8 @@ function installAnalyzerHarness(options: AnalyzerHarnessOptions = {}): {
   const renderedRegionRects: Rect[][] = [];
 
   AnalyzerWorker.automatic = options.automatic ?? true;
+  AnalyzerWorker.results = options.detections ?? detectionResults;
+  AnalyzerWorker.resultBatches = [...(options.detectionBatches ?? [])];
   AnalyzerWorker.instances.length = 0;
 
   globalThis.Worker = AnalyzerWorker as unknown as typeof Worker;
@@ -694,7 +1078,7 @@ function installAnalyzerHarness(options: AnalyzerHarnessOptions = {}): {
       },
     },
     DataDirectory: { dir: "/data" },
-    Prefs: { get: () => "replace-page" },
+    Prefs: { get: () => options.duplicateMode ?? "replace-page" },
     Utilities: { generateObjectKey: () => "ANNOTATION-KEY" },
   } as unknown as typeof Zotero;
   modelManager.ensureRecommendedModel = async () => ({
@@ -786,6 +1170,7 @@ function installAnalyzerHarness(options: AnalyzerHarnessOptions = {}): {
             pdfToPage: [1, 0, 0, -1, 0, 100],
             pageToPdf: [1, 0, 0, -1, 0, 100],
             viewBox: [0, 0, 100, 100],
+            ...options.pageData,
           };
         },
         async renderDetectionImage(pageIndex) {
@@ -805,7 +1190,7 @@ function installAnalyzerHarness(options: AnalyzerHarnessOptions = {}): {
           renderedPreviewPages++;
           return {
             encodeMs: 1,
-            images: [Uint8Array.from([137, 80, 78, 71]).buffer],
+            images: rects.map(() => Uint8Array.from([137, 80, 78, 71]).buffer),
             maxScale: 4,
             pixelCount: 160_000,
             renderMs: 2,

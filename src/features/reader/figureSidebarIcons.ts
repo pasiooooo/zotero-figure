@@ -6,10 +6,13 @@ export type FigureSidebarIconKind =
   | FigureResultKind
   | "annotation"
   | "check"
+  | "expand"
   | "languages"
   | "loading"
   | "menu"
+  | "pin"
   | "refresh"
+  | "region"
   | "search"
   | "trash";
 
@@ -73,6 +76,12 @@ export function getFigureSidebarIconParts(
   kind: FigureSidebarIconKind,
 ): Array<[string, Record<string, string>]> {
   switch (kind) {
+    case "expand":
+      return [["path", { d: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" }]];
+    case "region":
+      return [
+        ["path", { d: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 8h8v8H8z" }],
+      ];
     case "annotation":
       return [
         [
@@ -127,6 +136,11 @@ export function getFigureSidebarIconParts(
         ["circle", { cx: "5", cy: "12", r: "1" }],
         ["circle", { cx: "12", cy: "12", r: "1" }],
         ["circle", { cx: "19", cy: "12", r: "1" }],
+      ];
+    case "pin":
+      return [
+        ["path", { d: "M16 3H8l1 7-4 4v2h14v-2l-4-4 1-7Z" }],
+        ["path", { d: "M12 16v6" }],
       ];
     case "loading":
       return [

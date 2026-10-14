@@ -961,9 +961,13 @@ test("builds a library snapshot without exposing local image paths", async () =>
   };
   const resultStore = {
     list: async () => [storedResult],
+    remove: async () => undefined,
     listIndexedAttachmentKeys: async () => ["ATTACHMENT", "MISSING"],
   };
   const platform: FigureGalleryPlatform = {
+    chooseExportDirectory: async () => false,
+    exportImage: async () => undefined,
+    removeAnnotation: async () => undefined,
     getAttachment: async (_libraryID, key) =>
       key === "ATTACHMENT" ? attachment : false,
     getCollectionName: (id) => (id === 7 ? "Methods" : undefined),
@@ -1020,9 +1024,13 @@ test("rejects unavailable libraries and stale result IDs", async () => {
   const index = new FigureGalleryIndex(
     {
       list: async () => [],
+      remove: async () => undefined,
       listIndexedAttachmentKeys: async () => [],
     },
     {
+      chooseExportDirectory: async () => false,
+      exportImage: async () => undefined,
+      removeAnnotation: async () => undefined,
       getAttachment: async () => false,
       getCollectionName: () => undefined,
       getDefaultLibraryID: () => 1,
@@ -1052,6 +1060,7 @@ test("atomically drops deleted results when a library is reloaded", async () => 
         await waitForReload;
         return results;
       },
+      remove: async () => undefined,
       listIndexedAttachmentKeys: async () => ["ATTACHMENT"],
     },
     galleryPlatform([attachment]),
@@ -1090,6 +1099,7 @@ test("preserves the previous snapshot when an attachment refresh fails", async (
         if (failRefresh) throw new Error("manifest could not be read");
         return [storedGalleryResult("retained", "/images/retained.png")];
       },
+      remove: async () => undefined,
       listIndexedAttachmentKeys: async () => ["ATTACHMENT"],
     },
     galleryPlatform([attachment]),
@@ -1115,6 +1125,7 @@ test("resolves out-of-order same-library loads to the indexed snapshot", async (
     {
       list: async () =>
         requestCount++ === 0 ? await first.promise : await second.promise,
+      remove: async () => undefined,
       listIndexedAttachmentKeys: async () => ["ATTACHMENT"],
     },
     galleryPlatform([galleryAttachment(1, "ATTACHMENT")]),
@@ -1149,6 +1160,7 @@ test("bounds retained sources to the latest snapshot of each loaded library", as
   const index = new FigureGalleryIndex(
     {
       list: async (attachment) => resultsByLibrary.get(attachment.libraryID)!,
+      remove: async () => undefined,
       listIndexedAttachmentKeys: async (libraryID) => [
         libraryID === 1 ? "ONE" : "TWO",
       ],
@@ -1176,6 +1188,162 @@ test("bounds retained sources to the latest snapshot of each loaded library", as
     (await index.readImage(secondLibrary.entries[0].id)).base64,
     "L2ltYWdlcy90d28ucG5n",
   );
+});
+
+test("batch deletion deduplicates IDs, continues on failure, and invalidates only removed sources", async () => {
+  const removed: string[] = [];
+  const mirrored: string[] = [];
+  const results = ["one", "broken", "two"].map((id) =>
+    storedGalleryResult(id, `/images/${id}.png`),
+  );
+  const platform = galleryPlatform([
+    galleryAttachment(1, "ONE"),
+    galleryAttachment(2, "TWO"),
+  ]);
+  platform.removeAnnotation = async (_item, result) => {
+    mirrored.push(result.id);
+  };
+  const index = new FigureGalleryIndex(
+    {
+      list: async () => results,
+      listIndexedAttachmentKeys: async (libraryID) => [
+        libraryID === 1 ? "ONE" : "TWO",
+      ],
+      remove: async (_item, id) => {
+        if (id === "broken") throw new Error("disk failure");
+        removed.push(id);
+        return results.find((result) => result.id === id);
+      },
+    },
+    platform,
+  );
+  await index.loadLibrary(1);
+  await index.loadLibrary(2);
+  const outcome = await index.runBatch(
+    ["1:ONE:one", "1:ONE:one", "1:ONE:broken", "stale", "2:TWO:two"],
+    "delete",
+  );
+  assert.deepEqual(outcome?.completedIDs, ["1:ONE:one", "2:TWO:two"]);
+  assert.equal(outcome?.errors.length, 2);
+  assert.deepEqual(removed, ["one", "two"]);
+  assert.deepEqual(mirrored, removed);
+  await assert.rejects(index.readImage("1:ONE:one"), /no longer indexed/);
+  await index.readImage("1:ONE:broken");
+});
+
+test("batch deletion rejects read-only attachments and reports annotation cleanup errors after a committed removal", async () => {
+  const attachment = galleryAttachment(1, "ONE");
+  let writable = false;
+  attachment.isEditable = () => writable;
+  const result = storedGalleryResult("one", "/one.png");
+  let removals = 0;
+  const platform = galleryPlatform([attachment]);
+  platform.removeAnnotation = async () => {
+    throw new Error("annotation failure");
+  };
+  const index = new FigureGalleryIndex(
+    {
+      list: async () => [result],
+      listIndexedAttachmentKeys: async () => ["ONE"],
+      remove: async () => {
+        removals++;
+        return result;
+      },
+    },
+    platform,
+  );
+  await index.loadLibrary(1);
+  const denied = await index.runBatch(["1:ONE:one"], "delete");
+  assert.deepEqual(denied?.completedIDs, []);
+  assert.match(denied!.errors[0], /read-only/);
+  assert.equal(removals, 0);
+  writable = true;
+  const partial = await index.runBatch(["1:ONE:one"], "delete");
+  assert.deepEqual(partial?.completedIDs, ["1:ONE:one"]);
+  assert.match(partial!.errors[0], /annotation failure/);
+  await assert.rejects(index.readImage("1:ONE:one"), /no longer indexed/);
+});
+
+test("batch export supports cancellation, safe distinct names, and partial copy failures without deleting results", async () => {
+  const platform = galleryPlatform([
+    galleryAttachment(1, "ONE"),
+    galleryAttachment(2, "TWO"),
+  ]);
+  let directory: string | false = false;
+  const copies: string[][] = [];
+  platform.chooseExportDirectory = async () => directory;
+  platform.exportImage = async (path, target, filename) => {
+    copies.push([path, target, filename]);
+    if (path === "/broken.png") throw new Error("file exists");
+  };
+  const result = {
+    ...storedGalleryResult("one", "/one.png"),
+    tag: 'Figure: 1 / <test> "?',
+  };
+  const index = new FigureGalleryIndex(
+    {
+      list: async () => [result, storedGalleryResult("broken", "/broken.png")],
+      listIndexedAttachmentKeys: async (id) => [id === 1 ? "ONE" : "TWO"],
+      remove: async () => assert.fail("export must not remove results"),
+    },
+    platform,
+  );
+  await index.loadLibrary(1);
+  await index.loadLibrary(2);
+  assert.equal(await index.runBatch(["1:ONE:one"], "export"), undefined);
+  assert.equal(copies.length, 0);
+  directory = "/output";
+  const outcome = await index.runBatch(
+    ["1:ONE:one", "1:ONE:one", "1:ONE:broken", "2:TWO:one"],
+    "export",
+  );
+  assert.deepEqual(outcome?.completedIDs, ["1:ONE:one", "2:TWO:one"]);
+  assert.match(outcome!.errors[0], /file exists/);
+  assert.equal(copies.length, 3);
+  assert.equal(new Set(copies.map(([, , filename]) => filename)).size, 3);
+  for (const [, target, filename] of copies) {
+    assert.equal(target, directory);
+    assert.doesNotMatch(filename, /[<>:"/\\|?*]/);
+    assert.ok([...filename].every((character) => character.charCodeAt(0) > 31));
+    assert.ok(filename.endsWith(".png"));
+  }
+  await index.readImage("1:ONE:one");
+});
+
+test("reader batches load their attachment directly and discard stale indexed results", async () => {
+  const attachment = galleryAttachment(1, "ONE");
+  let results = [storedGalleryResult("one", "/one.png")];
+  const platform = galleryPlatform([attachment]);
+  platform.chooseExportDirectory = async () => "/output";
+  const copies: string[] = [];
+  platform.exportImage = async (path) => {
+    copies.push(path);
+  };
+  const index = new FigureGalleryIndex(
+    {
+      list: async () => results,
+      listIndexedAttachmentKeys: async () =>
+        assert.fail("reader must not scan the library"),
+      remove: async () => assert.fail("export must not delete"),
+    },
+    platform,
+  );
+  assert.deepEqual(
+    await index.runAttachmentBatch(attachment, ["one"], "export"),
+    {
+      completedIDs: ["one"],
+      errors: [],
+    },
+  );
+  results = [storedGalleryResult("two", "/two.png")];
+  const outcome = await index.runAttachmentBatch(
+    attachment,
+    ["one", "two"],
+    "export",
+  );
+  assert.deepEqual(outcome?.completedIDs, ["two"]);
+  assert.match(outcome!.errors[0], /no longer indexed/);
+  assert.deepEqual(copies, ["/one.png", "/two.png"]);
 });
 
 function comparisonCell(
@@ -1237,6 +1405,7 @@ function galleryAttachment(libraryID: number, key: string): Zotero.Item {
     isPDFAttachment: () => true,
     key,
     libraryID,
+    isEditable: () => true,
     topLevelItem: documentItem,
   } as unknown as Zotero.Item;
 }
@@ -1245,6 +1414,9 @@ function galleryPlatform(
   attachments: readonly Zotero.Item[],
 ): FigureGalleryPlatform {
   return {
+    chooseExportDirectory: async () => false,
+    exportImage: async () => undefined,
+    removeAnnotation: async () => undefined,
     getAttachment: async (libraryID, key) =>
       attachments.find(
         (attachment) =>

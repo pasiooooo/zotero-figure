@@ -23,6 +23,7 @@ interface BatchTotals {
   failed: number;
   notes: number;
   results: number;
+  skipped: number;
   succeeded: number;
 }
 
@@ -121,21 +122,35 @@ export class FigureBatchController {
         return;
       }
 
+      const existing: Zotero.Item[] = [];
+      for (const attachment of attachments) {
+        if (await this.resultStore.hasAnalysis(attachment, controller.signal)) {
+          existing.push(attachment);
+        }
+      }
+      throwIfAborted(controller.signal);
+      const reanalyze = existing.length > 0 && confirmReanalysis(existing);
+      throwIfAborted(controller.signal);
+      const existingIDs = new Set(existing.map(({ id }) => id));
+      const pending = reanalyze
+        ? attachments
+        : attachments.filter(({ id }) => !existingIDs.has(id));
       const totals: BatchTotals = {
         annotations: 0,
         failed: 0,
         notes: 0,
         results: 0,
+        skipped: attachments.length - pending.length,
         succeeded: 0,
       };
-      for (let index = 0; index < attachments.length; index++) {
+      for (let index = 0; index < pending.length; index++) {
         throwIfAborted(controller.signal);
-        const attachment = attachments[index];
+        const attachment = pending[index];
         const title = getAttachmentTitle(attachment);
         const progress = this.createAttachmentProgress(
           popup,
           index,
-          attachments.length,
+          pending.length,
           title,
         );
         try {
@@ -143,6 +158,9 @@ export class FigureBatchController {
             attachment,
             progress,
             {
+              duplicateMode: existingIDs.has(attachment.id)
+                ? "replace-page"
+                : undefined,
               signal: controller.signal,
               syncAnnotations: action === "annotations",
             },
@@ -175,9 +193,9 @@ export class FigureBatchController {
           });
         }
         popup.changeLine({
-          progress: Math.round(((index + 1) / attachments.length) * 100),
+          progress: Math.round(((index + 1) / pending.length) * 100),
           text: getString("batch-progress-finished-item", {
-            args: { current: index + 1, total: attachments.length },
+            args: { current: index + 1, total: pending.length },
           }),
         });
       }
@@ -188,7 +206,10 @@ export class FigureBatchController {
           text: getString("batch-progress-done", {
             args: { ...totals },
           }),
-          type: totals.failed === attachments.length ? "fail" : "success",
+          type:
+            pending.length > 0 && totals.failed === pending.length
+              ? "fail"
+              : "success",
         })
         .startCloseTimer(totals.failed > 0 ? 5_000 : 3_000);
     } catch (error) {
@@ -399,6 +420,37 @@ function getAttachmentTitle(attachment: Zotero.Item): string {
   return (
     attachment.topLevelItem?.getDisplayTitle() || attachment.getDisplayTitle()
   );
+}
+
+function confirmReanalysis(attachments: readonly Zotero.Item[]): boolean {
+  const prompt = ztoolkit.getGlobal("Services").prompt;
+  const choice = prompt.confirmEx(
+    Zotero.getMainWindow(),
+    getString("batch-reanalyze-title"),
+    getString("batch-reanalyze-message", {
+      args: {
+        count: attachments.length,
+        documents: attachments
+          .map((attachment, index) => {
+            const title = getAttachmentTitle(attachment);
+            const pdfTitle = attachment.getDisplayTitle();
+            return `${index + 1}. ${title}${pdfTitle !== title ? ` — ${pdfTitle}` : ""} [${attachment.key}]`;
+          })
+          .join("\n"),
+      },
+    }),
+    prompt.BUTTON_POS_0 * prompt.BUTTON_TITLE_IS_STRING +
+      prompt.BUTTON_POS_1 * prompt.BUTTON_TITLE_CANCEL +
+      prompt.BUTTON_POS_2 * prompt.BUTTON_TITLE_IS_STRING +
+      prompt.BUTTON_POS_2_DEFAULT,
+    getString("batch-reanalyze-overwrite"),
+    "",
+    getString("batch-reanalyze-skip"),
+    "",
+    { value: false },
+  );
+  if (choice !== 0 && choice !== 2) throw new OperationCancelledError();
+  return choice === 0;
 }
 
 function promptFigureCaption(defaultValue: string): string | null {

@@ -8,6 +8,26 @@ import {
   type PdfCharacter,
 } from "../src/domain/layout";
 
+test("manual region recognition accepts small figures and tables without captions", () => {
+  const page = createPage({
+    elements: [
+      { score: 0.9, type: "figure", xyxy: [0.1, 0.1, 0.12, 0.15] },
+      { score: 0.9, type: "table", xyxy: [0.6, 0.6, 0.9, 0.9] },
+    ],
+  });
+  assert.deepEqual(buildAnnotationCandidates(page), []);
+  assert.deepEqual(
+    buildAnnotationCandidates(page, true).map(({ tag, comment }) => ({
+      tag,
+      comment,
+    })),
+    [
+      { tag: "Figure", comment: "" },
+      { tag: "Table", comment: "" },
+    ],
+  );
+});
+
 test("reconstructs page text without inserting a space after a hyphen", () => {
   const chars: PdfCharacter[] = [
     character("multi-", [0, 0, 10, 10], true),
@@ -63,6 +83,62 @@ test("matches a figure with its caption and applies both view-box offsets", () =
       pageIndex: 2,
       rect: [110, 520, 510, 920],
       tag: "Figure 12",
+    },
+  ]);
+});
+
+test("retains complete figure, table and formula numbers in detected tags", () => {
+  for (const number of ["1.2", "1-10", "2.1"]) {
+    const figure = createPage({
+      chars: [character(`Fig. ${number}. Result`, [120, 425, 400, 475])],
+      elements: [
+        { score: 0.9, type: "figure", xyxy: [0.1, 0.1, 0.5, 0.5] },
+        { score: 0.9, type: "figure_caption", xyxy: [0.1, 0.52, 0.5, 0.58] },
+      ],
+    });
+    assert.equal(buildAnnotationCandidates(figure)[0].tag, `Figure ${number}`);
+    const table = createPage({
+      chars: [character(`Table ${number}. Result`, [120, 825, 400, 875])],
+      elements: [
+        { score: 0.9, type: "table", xyxy: [0.1, 0.3, 0.5, 0.8] },
+        { score: 0.9, type: "table_caption", xyxy: [0.1, 0.12, 0.5, 0.18] },
+      ],
+    });
+    assert.equal(buildAnnotationCandidates(table)[0].tag, `Table ${number}`);
+    const formula = createPage({
+      chars: [character(`(${number})`, [805, 525, 855, 575])],
+      elements: [
+        { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.4, 0.75, 0.5] },
+        { score: 0.9, type: "formula_caption", xyxy: [0.8, 0.42, 0.86, 0.48] },
+      ],
+    });
+    assert.equal(
+      buildAnnotationCandidates(formula)[0].tag,
+      `Formula ${number}`,
+    );
+  }
+});
+
+test("reads captions in absolute PDF coordinates on an offset CropBox", () => {
+  const page = createPage({
+    width: 100,
+    height: 100,
+    viewBox: [200, 300, 300, 400],
+    chars: [
+      character("Figure 7. Correct", [218, 308, 260, 310]),
+      character("Wrong text", [18, 8, 60, 10]),
+    ],
+    elements: [
+      { score: 0.9, type: "figure", xyxy: [0.1, 0.1, 0.9, 0.8] },
+      { score: 0.9, type: "figure_caption", xyxy: [0.1, 0.82, 0.9, 0.95] },
+    ],
+  });
+  assert.deepEqual(buildAnnotationCandidates(page), [
+    {
+      comment: "Figure 7. Correct",
+      tag: "Figure 7",
+      pageIndex: 2,
+      rect: [210, 320, 290, 390],
     },
   ]);
 });

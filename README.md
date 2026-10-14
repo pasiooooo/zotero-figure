@@ -2,11 +2,13 @@
 
 Extract figures, tables, and formulae from Zotero PDFs.
 
+This fork builds on [MuiseDestiny/zotero-figure](https://github.com/MuiseDestiny/zotero-figure). See the [changelog](CHANGELOG.md) for version 1.1.0 and the [release guide](docs/RELEASING.md) for tagged publishing.
+
 [English](README.md) | [简体中文](docs/README.zh-CN.md) | [Italiano](docs/README.it-IT.md) | [Русский](docs/README.ru-RU.md) | [日本語](docs/README.ja-JP.md) | [Español](docs/README.es-ES.md)
 
-[![Latest release](https://img.shields.io/github/v/release/MuiseDestiny/zotero-figure)](https://github.com/MuiseDestiny/zotero-figure/releases)
-[![License](https://img.shields.io/github/license/MuiseDestiny/zotero-figure)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/MuiseDestiny/zotero-figure/latest/total)](https://github.com/MuiseDestiny/zotero-figure/releases)
+[![Latest release](https://img.shields.io/github/v/release/pasiooooo/zotero-figure)](https://github.com/pasiooooo/zotero-figure/releases)
+[![License](https://img.shields.io/github/license/pasiooooo/zotero-figure)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/pasiooooo/zotero-figure/latest/total)](https://github.com/pasiooooo/zotero-figure/releases)
 
 Zotero Figure detects PDF figures, tables, display formulae, captions, and table footnotes. PDF reading, rendering, and layout detection run locally with the model bundled in the plugin.
 
@@ -28,7 +30,7 @@ Zotero Figure detects PDF figures, tables, display formulae, captions, and table
 ## Requirements
 
 - Zotero 9 or Zotero 10.
-- The Zotero Figure XPI from the [latest release](https://github.com/MuiseDestiny/zotero-figure/releases/latest).
+- The Zotero Figure XPI from the [latest release](https://github.com/pasiooooo/zotero-figure/releases/latest).
 - Formula OCR only: network access and a SiliconFlow API key.
 
 Java and `pdffigures2.jar` are not required.
@@ -42,8 +44,12 @@ Java and `pdffigures2.jar` are not required.
 ## Entry Points
 
 - **PDF Reader:** Open a PDF, select the Zotero Figure icon in the left sidebar, and choose **Analyze figures, tables, and formulae**.
+- **Sidebar browsing:** Double-click a caption (including an empty caption) to edit it in a resizable text area. Results with missing or unnumbered captions come first; numbered figures, tables, and formulae are grouped by type and naturally sorted by their full numbers, including `1.2` and `1-10`. The second toolbar button opens a maximized Library with the current document preselected and the bottom toolbar collapsed. It retains the main Library's view mode and full set of results; expand the toolbar to switch documents or clear the initial filter.
+- **Missed regions:** Choose **Recognize a selected region** in the Figure sidebar to show a screenshot-style selection overlay. Drag a rectangle on a PDF page and release to recognize it; Esc or right-click cancels. Include the caption when possible. If a figure or table caption is missing, an additional page detection pass supplies caption context without importing other figures. Caption text comes from the PDF text layer; scanned captions are not OCRed. Region recognition saves local results without creating Zotero annotations. Existing result cards also offer **Recognize this region again**. Only fully contained results are replaced; outside results and regions with no detections are preserved.
 - **Figure Library:** Open `Tools > PDF Figure Library` to browse results across documents. Double-click a card to open its source PDF.
+- **Library zoom:** Hold Ctrl (Windows/Linux) or Command (macOS) and scroll up/down, or press `+`/`-`, to resize images in 10% steps (50%–200%). These shortcuts also work in the maximized Library window and stay synchronized with the size slider.
 - **Batch Processing:** Select library items or PDF attachments, right-click, and open `PDF Figure >` to analyze them, add results to notes, or create annotations. Select image annotations and choose `Add to Figure` for batch import.
+  Before analysis, PDFs with saved results are listed for confirmation: reanalyze and replace them, skip them while processing new PDFs, or cancel the batch. Completed analyses with no detections also count as analyzed.
 - **Preferences:** Open the PDF Figure preferences pane to manage the bundled model, annotation synchronization, and SiliconFlow formula OCR, or to open the Figure Library directly. Use **Convert existing formulae** to recognize uncached formulae across libraries.
 
 ## Privacy
@@ -54,6 +60,6 @@ Formula OCR is optional. API-key checking sends a text-only request to SiliconFl
 
 ## Links
 
-- [Releases](https://github.com/MuiseDestiny/zotero-figure/releases)
-- [Issues](https://github.com/MuiseDestiny/zotero-figure/issues)
+- [Releases](https://github.com/pasiooooo/zotero-figure/releases)
+- [Issues](https://github.com/pasiooooo/zotero-figure/issues)
 - [AGPL-3.0-or-later license](LICENSE)

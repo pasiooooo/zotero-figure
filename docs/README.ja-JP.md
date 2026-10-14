@@ -24,7 +24,7 @@ Zotero Figure は PDF 内の図、表、独立数式、キャプション、表�
 ## 必要環境
 
 - Zotero 9 または Zotero 10。
-- [最新リリース](https://github.com/MuiseDestiny/zotero-figure/releases/latest)の Zotero Figure XPI。
+- [最新リリース](https://github.com/pasiooooo/zotero-figure/releases/latest)の Zotero Figure XPI。
 - 数式 OCR を使う場合のみ、ネットワーク接続と SiliconFlow API キー。
 
 Java と `pdffigures2.jar` は不要です。
@@ -50,6 +50,6 @@ PDF の解析、描画、レイアウト検出、結果の保存は端末上で�
 
 ## リンク
 
-- [リリース](https://github.com/MuiseDestiny/zotero-figure/releases)
-- [問題報告](https://github.com/MuiseDestiny/zotero-figure/issues)
+- [リリース](https://github.com/pasiooooo/zotero-figure/releases)
+- [問題報告](https://github.com/pasiooooo/zotero-figure/issues)
 - [AGPL-3.0-or-later ライセンス](../LICENSE)

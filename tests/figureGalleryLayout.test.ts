@@ -105,12 +105,11 @@ test("exposes all requested cross-document filters", () => {
   assert.match(markup, /M3 12a9 9 0 1 0 3-6\.7L3 8/);
   assert.match(markup, /class="gallery-toolbar-toggle-icon"/);
   assert.match(markup, /<path d="m6 9 6 6 6-6"/);
-  assert.match(script, /classList\.toggle\("is-collapsed"\)/);
+  assert.match(script, /classList\.toggle\("is-collapsed", collapsed\)/);
   assert.match(script, /getViewMode\(\)/);
   assert.match(script, /setViewMode\(viewMode\)/);
   assert.match(script, /getImageScale\?\.\(\)/);
   assert.match(script, /setImageScale\?\.\(imageScale\)/);
-  assert.doesNotMatch(script, /handleGalleryWheel|addEventListener\("wheel"/);
   assert.match(script, /scheduleGalleryImageScalePersistence/);
   assert.match(
     script,
@@ -500,14 +499,14 @@ test("supports native grouping menus and primary-image selection", () => {
     "function handleGalleryContextMenu(",
     "\nasync function openGalleryContextMenu(",
   );
-  assert.match(contextMenuHandler, /viewMode !== "document-columns"/);
-  assert.match(contextMenuHandler, /'\[data-comparison-entry="true"\]'/);
+  assert.doesNotMatch(contextMenuHandler, /viewMode !== "document-columns"/);
+  assert.match(contextMenuHandler, /"\.gallery-card"/);
   assert.match(
     contextMenuHandler,
     /\.closest<HTMLElement>\("\.comparison-row-label"\)/,
   );
   assert.match(contextMenuHandler, /entryElement\?\.dataset\.rowId/);
-  assert.match(contextMenuHandler, /entryElement\.dataset\.entryId/);
+  assert.match(contextMenuHandler, /entryElement\.dataset\.id/);
   assert.match(contextMenuHandler, /\.comparison-row-label-input/);
   assert.match(contextMenuHandler, /\+\+galleryContextMenuRequestID/);
   assert.match(contextMenuHandler, /event\.preventDefault\(\)/);
@@ -523,7 +522,7 @@ test("supports native grouping menus and primary-image selection", () => {
   assert.match(contextMenu, /createXULElement\("menu"\)/);
   assert.match(
     contextMenu,
-    /layout\.rows\.filter\(\(\{ isGroup \}\) => isGroup\)/,
+    /layout\?\.rows\.filter\(\(\{ isGroup \}\) => isGroup\)/,
   );
   assert.match(
     contextMenu,
@@ -537,7 +536,7 @@ test("supports native grouping menus and primary-image selection", () => {
     contextMenu,
     /moveComparisonEntryToGroup\([\s\S]*target\.documentID![\s\S]*target\.entryID![\s\S]*row\.id/,
   );
-  assert.match(contextMenu, /dissolveComparisonRow\(target\.rowID\)/);
+  assert.match(contextMenu, /dissolveComparisonRow\(sourceRow\.id\)/);
   assert.match(contextMenu, /"popuphidden"[\s\S]*popup\.remove\(\)/);
   assert.match(contextMenu, /openPopupAtScreen\(screenX, screenY, true\)/);
 

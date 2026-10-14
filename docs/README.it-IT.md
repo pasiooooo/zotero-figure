@@ -24,7 +24,7 @@ Zotero Figure rileva figure, tabelle, formule isolate, didascalie e note a piè 
 ## Requisiti
 
 - Zotero 9 o Zotero 10.
-- L'XPI di Zotero Figure dall'[ultima versione](https://github.com/MuiseDestiny/zotero-figure/releases/latest).
+- L'XPI di Zotero Figure dall'[ultima versione](https://github.com/pasiooooo/zotero-figure/releases/latest).
 - Solo per l'OCR delle formule: accesso alla rete e una chiave API SiliconFlow.
 
 Java e `pdffigures2.jar` non sono necessari.
@@ -50,6 +50,6 @@ L'OCR delle formule è facoltativo. La verifica della chiave API invia a Silicon
 
 ## Collegamenti
 
-- [Versioni](https://github.com/MuiseDestiny/zotero-figure/releases)
-- [Segnalazioni](https://github.com/MuiseDestiny/zotero-figure/issues)
+- [Versioni](https://github.com/pasiooooo/zotero-figure/releases)
+- [Segnalazioni](https://github.com/pasiooooo/zotero-figure/issues)
 - [Licenza AGPL-3.0-or-later](../LICENSE)

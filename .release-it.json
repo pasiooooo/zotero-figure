@@ -2,12 +2,16 @@
   "npm": {
     "publish": false
   },
+  "git": {
+    "tagName": "v${version}",
+    "commitMessage": "chore: release v${version}",
+    "pushRepo": "origin"
+  },
   "github": {
-    "release": true,
-    "assets": ["build/*.xpi"]
+    "release": false
   },
   "hooks": {
-    "after:bump": "npm run build",
-    "after:release": "echo Successfully released ${name} v${version} to ${repo.repository}."
+    "after:bump": "npm run build && npm run check && npm run release:prepare",
+    "after:release": "echo Pushed v${version}. GitHub Actions will build and publish the release."
   }
 }

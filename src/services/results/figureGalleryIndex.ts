@@ -1,6 +1,7 @@
 import {
   extractFigureGalleryYear,
   type FigureGalleryBootstrap,
+  type FigureGalleryBatchResult,
   type FigureGalleryEntry,
   type FigureGalleryImage,
   type FigureGallerySnapshot,
@@ -15,11 +16,18 @@ import type { StoredFigureResult } from "./figureResultStore";
 const INDEX_CONCURRENCY = 4;
 
 interface FigureGalleryResultStore {
+  remove(
+    item: Zotero.Item,
+    resultID: string,
+  ): Promise<StoredFigureResult | undefined>;
   list(item: Zotero.Item): Promise<StoredFigureResult[]>;
   listIndexedAttachmentKeys(libraryID: number): Promise<string[]>;
 }
 
 interface IndexedFigureSource {
+  attachmentKey: string;
+  resultID: string;
+  exportFilename: string;
   attachmentID: number;
   imagePath: string;
   libraryID: number;
@@ -149,6 +157,84 @@ export class FigureGalleryIndex {
     );
   }
 
+  public async runBatch(
+    entryIDs: readonly string[],
+    action: "delete" | "export",
+  ): Promise<FigureGalleryBatchResult | undefined> {
+    if (!entryIDs.length) return { completedIDs: [], errors: [] };
+    const directory =
+      action === "export"
+        ? await this.platform.chooseExportDirectory()
+        : undefined;
+    if (directory === false) return undefined;
+    const outcome: FigureGalleryBatchResult = { completedIDs: [], errors: [] };
+    for (const entryID of new Set(entryIDs)) {
+      try {
+        const source = this.getSource(entryID);
+        if (action === "export") {
+          await this.platform.exportImage(
+            source.imagePath,
+            directory!,
+            source.exportFilename,
+          );
+          outcome.completedIDs.push(entryID);
+          continue;
+        }
+        const attachment = await this.platform.getAttachment(
+          source.libraryID,
+          source.attachmentKey,
+        );
+        if (!attachment || !attachment.isPDFAttachment())
+          throw new Error("PDF attachment is unavailable");
+        if (!attachment.isEditable())
+          throw new Error("PDF attachment is read-only");
+        const removed = await this.resultStore.remove(
+          attachment,
+          source.resultID,
+        );
+        this.sources.delete(entryID);
+        const snapshot = this.snapshots.get(source.libraryID);
+        if (snapshot)
+          snapshot.entries = snapshot.entries.filter(
+            ({ id }) => id !== entryID,
+          );
+        outcome.completedIDs.push(entryID);
+        if (removed) await this.platform.removeAnnotation(attachment, removed);
+      } catch (error) {
+        const resolved = toError(error);
+        this.platform.logError(resolved);
+        outcome.errors.push(`${entryID}: ${resolved.message}`);
+      }
+    }
+    return outcome;
+  }
+
+  public async runAttachmentBatch(
+    attachment: Zotero.Item,
+    resultIDs: readonly string[],
+    action: "delete" | "export",
+  ): Promise<FigureGalleryBatchResult | undefined> {
+    const indexed = await this.loadAttachment(
+      attachment.libraryID,
+      attachment.key,
+    );
+    const prefix = `${attachment.libraryID}:${attachment.key}:`;
+    for (const id of this.sources.keys()) {
+      if (id.startsWith(prefix)) this.sources.delete(id);
+    }
+    for (const { entry, source } of indexed) this.sources.set(entry.id, source);
+    const outcome = await this.runBatch(
+      resultIDs.map((id) => prefix + id),
+      action,
+    );
+    return (
+      outcome && {
+        ...outcome,
+        completedIDs: outcome.completedIDs.map((id) => id.slice(prefix.length)),
+      }
+    );
+  }
+
   private getSource(entryID: string): IndexedFigureSource {
     const source = this.sources.get(entryID);
     if (!source) throw new Error("Figure gallery result is no longer indexed");
@@ -228,6 +314,14 @@ export class FigureGalleryIndex {
             year,
           },
           source: {
+            attachmentKey: attachment.key,
+            resultID: result.id,
+            exportFilename:
+              `${documentTitle.slice(0, 60)}-${result.tag.slice(0, 30)}-${libraryID}-${attachment.key}-${result.id}.png`.replace(
+                // eslint-disable-next-line no-control-regex -- File names cannot contain control characters.
+                /[<>:"/\\|?*\u0000-\u001f]/g,
+                "_",
+              ),
             attachmentID: attachment.id,
             imagePath: result.imagePath,
             libraryID,

@@ -4,8 +4,55 @@ import {
   clampPinnedCardTransform,
   getPinnedCardSmoothingProgress,
   interpolatePinnedCardTransform,
+  layoutPinnedCards,
   zoomPinnedCardAtPoint,
 } from "../src/domain/pinnedFigureCard";
+
+test("floating card layouts stay within the reader, never overlap and shrink dense batches", () => {
+  for (const count of [1, 2, 3, 8, 30, 100]) {
+    for (const area of [
+      { x: 300, y: 12, width: 900, height: 700 },
+      { x: 100, y: 12, width: 200, height: 140 },
+    ]) {
+      const sizes = Array.from({ length: count }, (_, index) => ({
+        width: 300 + (index % 3) * 100,
+        height: 180 + (index % 4) * 90,
+      }));
+      const cells = layoutPinnedCards(sizes, area, { x: 10000, y: 10000 });
+      assert.equal(cells.length, count);
+      for (const [index, cell] of cells.entries()) {
+        assert.ok(cell.width > 0 && cell.height > 0);
+        assert.ok(cell.x >= area.x && cell.y >= area.y);
+        assert.ok(cell.x + cell.width <= area.x + area.width + 1e-8);
+        assert.ok(cell.y + cell.height <= area.y + area.height + 1e-8);
+        for (const other of cells.slice(index + 1)) {
+          assert.ok(
+            cell.x + cell.width <= other.x ||
+              other.x + other.width <= cell.x ||
+              cell.y + cell.height <= other.y ||
+              other.y + other.height <= cell.y,
+          );
+        }
+      }
+    }
+  }
+  assert.deepEqual(
+    layoutPinnedCards(
+      [],
+      { x: 0, y: 0, width: 800, height: 600 },
+      { x: 100, y: 100 },
+    ),
+    [],
+  );
+  assert.deepEqual(
+    layoutPinnedCards(
+      [{ width: 200, height: 150 }],
+      { x: 300, y: 12, width: 900, height: 700 },
+      { x: 400, y: 120 },
+    ),
+    [{ x: 400, y: 120, width: 200, height: 150 }],
+  );
+});
 
 test("keeps a pinned card inside the viewport when it fits", () => {
   assert.deepEqual(

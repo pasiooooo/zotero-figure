@@ -4,6 +4,7 @@ import {
   type DuplicateMode,
 } from "../../domain/figureResults";
 import type { AnnotationCandidate, Rect } from "../../domain/layout";
+import { containsResultRegion } from "../../domain/resultRegion";
 import { throwIfAborted } from "../../utils/cancellation";
 import type { PdfReader } from "./reader";
 
@@ -157,9 +158,28 @@ export async function reconcileGeneratedAnnotations(
   candidates: readonly AnnotationCandidate[],
   mode: DuplicateMode,
   signal?: AbortSignal,
+  region?: Rect,
 ): Promise<ReconcileResult> {
   const attachment = getAnnotationAttachment(target);
-  const existing = getGeneratedAnnotationsForPage(attachment, pageIndex);
+  const existing = getGeneratedAnnotationsForPage(attachment, pageIndex).filter(
+    (annotation) => {
+      if (!region) return true;
+      const rect = parseAnnotationPosition(annotation.annotationPosition)
+        ?.rects?.[0];
+      return (
+        Array.isArray(rect) &&
+        rect.length === 4 &&
+        rect.every(Number.isFinite) &&
+        containsResultRegion(region, rect as Rect)
+      );
+    },
+  );
+  if (region) {
+    candidates = candidates.filter(({ rect }) =>
+      containsResultRegion(region, rect),
+    );
+    if (candidates.length === 0) return { created: 0, removed: 0, skipped: 0 };
+  }
   if (mode === "skip-existing") {
     return appendMissingAnnotations(target, existing, candidates, signal);
   }

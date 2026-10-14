@@ -356,7 +356,7 @@ test("pins a complete card with an independent image URL", () => {
   const createCard = getSourceSection(
     panelSource,
     "  private createCard(",
-    "  private scheduleImageNavigation(",
+    "  private createCardMedia(",
   );
   const pinCard = getSourceSection(
     panelSource,
@@ -438,7 +438,11 @@ test("pins a complete card with an independent image URL", () => {
   );
 
   assert.match(createCard, /media\.addEventListener\("dblclick"/);
-  assert.match(createCard, /this\.cancelImageNavigation\(\)/);
+  assert.match(createCard, /media\.addEventListener\("pointerup", finish\)/);
+  assert.doesNotMatch(
+    panelSource,
+    /scheduleImageNavigation|cancelImageNavigation/,
+  );
   assert.match(pinCard, /IOUtils\.read\(result\.imagePath\)/);
   assert.match(pinCard, /this\.pinGeneration !== generation/);
   assert.match(
@@ -475,10 +479,7 @@ test("pins a complete card with an independent image URL", () => {
   );
   assert.match(restoreInteractions, /this\.createComment\(document, result\)/);
   assert.match(restoreInteractions, /this\.getCurrentResult\(result\.id\)/);
-  assert.match(
-    restoreInteractions,
-    /this\.scheduleImageNavigation\(getCurrentResult\(\)\)/,
-  );
+  assert.match(restoreInteractions, /this\.goToPage\(getCurrentResult\(\)\)/);
   assert.match(
     preparePinnedCard,
     /sourceGeometry\.width > 0[\s\S]*sourceGeometry\.width[\s\S]*FALLBACK_WIDTH/,
@@ -509,14 +510,21 @@ test("pins a complete card with an independent image URL", () => {
   assert.match(bindPinnedCard, /MAX_WHEEL_DELTA[\s\S]*WHEEL_SENSITIVITY/);
   assert.match(bindPinnedCard, /requestAnimationFrame\(step\)/);
   assert.match(bindPinnedCard, /cancelAnimationFrame\(transformFrameID\)/);
-  assert.match(bindPinnedCard, /addEventListener\("dblclick"/);
+  assert.doesNotMatch(
+    bindPinnedCard,
+    /addEventListener\("click", handleOutsideClick, true\)/,
+  );
+  assert.match(
+    bindPinnedCard,
+    /addEventListener\("keydown", handleKeyDown, true\)/,
+  );
+  assert.match(bindPinnedCard, /pinButton\.setAttribute\("aria-pressed"/);
   assert.match(
     bindPinnedCard,
     /target\?\.closest\("button, a, input, select, textarea"\)/,
   );
   assert.match(bindPinnedCard, /onClose\(\)/);
   assert.match(pinCard, /onClose: \(\) => this\.closePinnedCard\(result\.id\)/);
-  assert.match(closePinnedCard, /this\.cancelImageNavigation\(\)/);
   assert.match(closePinnedCard, /entry\.element\.contains\(this\.menuAnchor\)/);
   assert.match(closePinnedCard, /this\.closeMenu\(\)/);
   assert.match(reconcilePinnedCards, /this\.requestPinnedCardRefresh/);
@@ -538,15 +546,17 @@ test("pins a complete card with an independent image URL", () => {
     /\.zoterofigure-sidebar-card:not\(\.zoterofigure-pinned-card\)/,
   );
   assert.match(openMenu, /"sidebar-pin-image"/);
-  assert.match(openMenu, /this\.cancelImageNavigation\(\)/);
-  assert.match(openMenu, /return this\.pinCard\(result, sourceCard\)/);
-  assert.ok(
-    openMenu.indexOf('"sidebar-save-image"') <
-      openMenu.indexOf('"sidebar-pin-image"'),
+  assert.match(openMenu, /return this\.pinSelectedCards\(result, sourceCard\)/);
+  const singleMenu = openMenu.slice(
+    openMenu.indexOf("if (!sourceCard || this.selectedResultIDs.size === 1)"),
   );
   assert.ok(
-    openMenu.indexOf('"sidebar-pin-image"') <
-      openMenu.indexOf('"sidebar-go-to-page"'),
+    singleMenu.indexOf('"sidebar-save-image"') <
+      singleMenu.indexOf('"sidebar-pin-image"'),
+  );
+  assert.ok(
+    singleMenu.indexOf('"sidebar-pin-image"') <
+      singleMenu.indexOf('"sidebar-go-to-page"'),
   );
   assert.match(openMenu, /"sidebar-edit-comment"/);
   assert.match(openMenu, /this\.openCommentEditor\(result\)/);
@@ -565,7 +575,7 @@ test("pins a complete card with an independent image URL", () => {
   assert.match(resultEditorSource, /tag: "textarea"/);
   assert.match(resultEditorSource, /"data-bind": "comment"/);
   assert.match(resultEditorSource, /COMMENT_EDITOR_MAX_LENGTH/);
-  assert.match(resultEditorSource, /rows: 2/);
+  assert.match(resultEditorSource, /rows: 6/);
   assert.match(resultEditorSource, /resize: "none"/);
   assert.match(resultEditorSource, /openCodeMirrorLatexEditor/);
   assert.match(resultEditorSource, /latexEditor\?\.close/);

@@ -21,6 +21,7 @@ import type { ReaderAnnotationData } from "../../platform/zotero/readerAnnotatio
 import { getReaderImageCropDataURL } from "../../platform/zotero/readerImageRenderer";
 import type { PdfReader } from "../../platform/zotero/reader";
 import { FigureOutputService } from "../../services/figureOutputService";
+import { FigureGalleryIndex } from "../../services/results/figureGalleryIndex";
 import {
   FormulaLatexCoordinator,
   type FormulaLatexEditSnapshot,
@@ -37,6 +38,7 @@ import { bytesToDataURL } from "../../utils/dataURL";
 import { getString } from "../../utils/locale";
 import { getPref } from "../../utils/prefs";
 import { FigureSidebarPanel } from "./figureSidebarPanel";
+import { startReaderRegionSelection } from "./readerRegionSelection";
 
 interface ReaderDocumentRegistration {
   document: Document;
@@ -45,11 +47,13 @@ interface ReaderDocumentRegistration {
 
 export class FigureReaderController {
   private readonly activeAnalyses = new Map<PdfReader, AbortController>();
+  private readonly regionSelections = new Map<PdfReader, () => void>();
   private hydrateTimeoutID?: number;
   private prewarmIdleID?: number;
   private prewarmScheduled = false;
   private prewarmTimeoutID?: number;
   private readonly resultStore: FigureResultStore;
+  private readonly galleryIndex: FigureGalleryIndex;
   private readonly layoutAnalyzer: LayoutAnalyzer;
   private readonly outputService: FigureOutputService;
   private readonly formulaLatex: FormulaLatexCoordinator;
@@ -62,6 +66,7 @@ export class FigureReaderController {
   >();
   private readonly sidebarPanels = new Map<PdfReader, FigureSidebarPanel>();
   private started = false;
+  private readonly openGallery?: (attachment: Zotero.Item) => void;
 
   private readonly renderReaderHandler: _ZoteroTypes.Reader.EventHandler<"renderToolbar"> =
     ({ doc, reader }) => {
@@ -109,6 +114,22 @@ export class FigureReaderController {
         label: getString("reader-menu-add-to-figure"),
         onCommand: run,
       });
+      append({
+        label: getString("reader-menu-recognize-region"),
+        disabled: this.activeAnalyses.has(pdfReader),
+        onCommand: () => {
+          this.win.setTimeout(() => {
+            if (!this.started) return;
+            void this.runAnalysis(
+              pdfReader,
+              annotations.map(({ position }) => ({
+                pageIndex: position!.pageIndex,
+                rect: position!.rects![0] as Rect,
+              })),
+            );
+          }, 100);
+        },
+      });
     };
 
   constructor(
@@ -117,9 +138,14 @@ export class FigureReaderController {
       formulaLatex?: FormulaLatexCoordinator;
       layoutAnalyzer: LayoutAnalyzer;
       resultStore: FigureResultStore;
+      galleryIndex?: FigureGalleryIndex;
+      openGallery?: (attachment: Zotero.Item) => void;
     },
   ) {
+    this.openGallery = dependencies?.openGallery;
     this.resultStore = dependencies?.resultStore ?? new FigureResultStore();
+    this.galleryIndex =
+      dependencies?.galleryIndex ?? new FigureGalleryIndex(this.resultStore);
     this.layoutAnalyzer =
       dependencies?.layoutAnalyzer ?? new LayoutAnalyzer(this.resultStore);
     this.formulaLatex =
@@ -162,6 +188,8 @@ export class FigureReaderController {
     );
     for (const controller of this.activeAnalyses.values()) controller.abort();
     this.activeAnalyses.clear();
+    for (const dispose of this.regionSelections.values()) dispose();
+    this.regionSelections.clear();
     this.unsubscribeFormulaLatex();
     if (this.ownsFormulaLatex) this.formulaLatex.dispose();
     if (this.ownsLayoutAnalyzer) this.layoutAnalyzer.dispose();
@@ -188,8 +216,30 @@ export class FigureReaderController {
     this.sidebarPanels.clear();
   }
 
-  private async runAnalysis(reader: PdfReader): Promise<void> {
+  private startRegionSelection(reader: PdfReader): void {
     if (this.activeAnalyses.has(reader)) return;
+    this.regionSelections.get(reader)?.();
+    try {
+      const dispose = startReaderRegionSelection(
+        reader,
+        (region) => {
+          void this.runAnalysis(reader, [region]);
+        },
+        () => this.regionSelections.delete(reader),
+      );
+      this.regionSelections.set(reader, dispose);
+    } catch (error) {
+      Zotero.logError(toError(error));
+      this.win.alert(toError(error).message);
+    }
+  }
+
+  private async runAnalysis(
+    reader: PdfReader,
+    regions?: readonly Pick<AnnotationCandidate, "pageIndex" | "rect">[],
+  ): Promise<void> {
+    if (this.activeAnalyses.has(reader)) return;
+    this.regionSelections.get(reader)?.();
     const controller = new this.win.AbortController();
     this.activeAnalyses.set(reader, controller);
     this.refreshSidebarControls(reader);
@@ -201,23 +251,59 @@ export class FigureReaderController {
     );
     const startedAt = Date.now();
     try {
-      const summary = await this.layoutAnalyzer.analyzeAttachment(
-        reader._item,
-        {
-          update: (text, progress) => {
-            latestProgress = progress;
-            panel?.updateAnalysisProgress(text, progress);
-          },
-        },
-        {
-          signal: controller.signal,
-          annotationReader: reader,
-          syncAnnotations: getPref("syncAnnotations") === true,
-        },
-      );
+      const summary = regions
+        ? {
+            annotationsCreated: 0,
+            resultsCreated: 0,
+            resultsRemoved: 0,
+            resultsSkipped: 0,
+          }
+        : await this.layoutAnalyzer.analyzeAttachment(
+            reader._item,
+            {
+              update: (text, progress) => {
+                latestProgress = progress;
+                panel?.updateAnalysisProgress(text, progress);
+              },
+            },
+            {
+              signal: controller.signal,
+              annotationReader: reader,
+              syncAnnotations: getPref("syncAnnotations") === true,
+            },
+          );
+      let emptyRegions = 0;
+      if (regions) {
+        for (const [index, region] of regions.entries()) {
+          const outcome = await this.layoutAnalyzer.analyzeRegion(
+            reader._item,
+            region.pageIndex,
+            region.rect,
+            {
+              signal: controller.signal,
+              annotationReader: reader,
+              syncAnnotations: false,
+            },
+          );
+          summary.annotationsCreated += outcome.annotations.created;
+          summary.resultsCreated += outcome.results.created;
+          summary.resultsRemoved += outcome.results.removed;
+          summary.resultsSkipped += outcome.results.skipped;
+          if (outcome.results.created + outcome.results.skipped === 0)
+            emptyRegions++;
+          latestProgress = ((index + 1) / regions.length) * 100;
+          panel?.updateAnalysisProgress(
+            getString("progress-detecting", {
+              args: { current: index + 1, total: regions.length },
+            }),
+            latestProgress,
+          );
+        }
+      }
       panel?.updateAnalysisProgress(
-        getString("progress-done", {
+        getString(regions ? "progress-region-done" : "progress-done", {
           args: {
+            empty: emptyRegions,
             annotations: summary.annotationsCreated,
             count: summary.resultsCreated,
             removed: summary.resultsRemoved,
@@ -227,7 +313,7 @@ export class FigureReaderController {
         }),
         100,
         "success",
-        3_000,
+        regions ? 8_000 : 3_000,
       );
     } catch (error) {
       if (isCancellationError(error)) {
@@ -616,6 +702,10 @@ export class FigureReaderController {
     this.sidebarPanels.get(reader)?.reloadResults();
   }
 
+  public reloadResults(): void {
+    for (const panel of this.sidebarPanels.values()) panel.reloadResults();
+  }
+
   private registerReader(reader: PdfReader, doc: Document): void {
     this.registerReaderDocument(reader, doc);
     let panel = this.sidebarPanels.get(reader);
@@ -628,6 +718,9 @@ export class FigureReaderController {
         onAddAllToNote: (results) => this.addAllToNote(reader, results),
         onAddToNote: (result) => this.addResultToNote(reader, result),
         onAnalyze: () => this.runAnalysis(reader),
+        onOpenGallery: () => this.openGallery?.(reader._item),
+        onSelectRegion: () => this.startRegionSelection(reader),
+        onRecognizeRegion: (result) => this.runAnalysis(reader, [result]),
         onCancelAnalysis: () => this.cancelAnalysis(reader),
         onCacheTranslations: (contextKey, updates) =>
           this.resultStore.saveTranslations(reader._item, contextKey, updates),
@@ -641,6 +734,8 @@ export class FigureReaderController {
         onEditLatex: (edit, latex) => this.editResultLatex(reader, edit, latex),
         onGoToPage: (result) => this.navigateToResult(reader, result),
         onRemove: (result) => this.removeResult(reader, result),
+        onRunBatch: (resultIDs, action) =>
+          this.galleryIndex.runAttachmentBatch(reader._item, resultIDs, action),
         onRerecognizeLatex: (result) =>
           this.rerecognizeResultLatex(reader, result),
         onResultsDisplayed: () =>
@@ -674,6 +769,7 @@ export class FigureReaderController {
   private registerReaderDocument(reader: PdfReader, document: Document): void {
     const current = this.readerDocuments.get(reader);
     if (current?.document === document) return;
+    this.regionSelections.get(reader)?.();
     current?.document.defaultView?.removeEventListener(
       "pagehide",
       current.handlePageHide,
@@ -682,6 +778,7 @@ export class FigureReaderController {
       const registered = this.readerDocuments.get(reader);
       if (registered?.document !== document) return;
       this.readerDocuments.delete(reader);
+      this.regionSelections.get(reader)?.();
       this.activeAnalyses.get(reader)?.abort();
       const panel = this.sidebarPanels.get(reader);
       if (panel) {

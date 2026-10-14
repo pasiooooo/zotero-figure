@@ -1,6 +1,8 @@
 import { config } from "../../../package.json";
+import { getGalleryInitialFilter } from "./galleryInitialFilter";
 import type {
   FigureGalleryBootstrap,
+  FigureGalleryBatchResult,
   FigureGalleryComparisonCell,
   FigureGalleryComparisonLayout,
   FigureGalleryComparisonRow,
@@ -49,6 +51,7 @@ const COMPARISON_ROW_PAGE_SIZE = 20;
 const GALLERY_DRAG_DATA_TYPE = "application/x-zoterofigure-gallery";
 const GALLERY_CONTEXT_MENU_ID = `${config.addonRef}-gallery-context-menu`;
 const GALLERY_SCALE_PERSIST_DEBOUNCE_MS = 160;
+const GALLERY_SCALE_STEP = 10;
 const GALLERY_DRAG_SCROLL_EDGE = 64;
 const GALLERY_DRAG_SCROLL_MAX_STEP = 24;
 const GALLERY_CELL_DROP_EDGE_RATIO = 0.25;
@@ -65,6 +68,10 @@ interface FigureGalleryApi {
   loadLibrary(libraryID: number): Promise<FigureGallerySnapshot>;
   openSource(entryID: string): Promise<void>;
   readImage(entryID: string): Promise<FigureGalleryImage>;
+  runBatch(
+    entryIDs: string[],
+    action: "delete" | "export",
+  ): Promise<FigureGalleryBatchResult | undefined>;
   setComparisonLayout(
     libraryID: number,
     layout: Readonly<FigureGalleryComparisonLayout>,
@@ -81,6 +88,7 @@ interface GalleryAddon {
 }
 
 interface GalleryElements {
+  batchStatus: HTMLSpanElement;
   collectionFilter: HTMLSelectElement;
   documentFilter: HTMLSelectElement;
   errorBanner: HTMLDivElement;
@@ -229,6 +237,11 @@ let galleryContextMenu: GalleryContextMenuPopup | undefined;
 let galleryContextMenuRequestID = 0;
 let unsubscribeFormulaLatex: (() => void) | undefined;
 let disposed = false;
+const selectedEntryIDs = new Set<string>();
+let selectionAnchorID: string | undefined;
+let controlsDisabled = true;
+let batchBusy = false;
+let initialFilter: ReturnType<typeof getGalleryInitialFilter>;
 
 window.addEventListener("DOMContentLoaded", () => void initialize());
 window.addEventListener("unload", dispose);
@@ -260,8 +273,10 @@ async function initialize(): Promise<void> {
       setControlsDisabled(true);
       return;
     }
-    selectedLibraryID = bootstrap.defaultLibraryID;
-    await loadLibrary(bootstrap.defaultLibraryID);
+    initialFilter = getGalleryInitialFilter(window.location.search, bootstrap);
+    if (initialFilter) setToolbarCollapsed(true);
+    selectedLibraryID = initialFilter?.libraryID ?? bootstrap.defaultLibraryID;
+    await loadLibrary(selectedLibraryID);
   } catch (error) {
     if (disposed) return;
     showError(error);
@@ -275,6 +290,7 @@ function createLibraryLoader(
   return new GalleryLibraryLoadCoordinator({
     buildFilterOptions: () => buildEntryFilterLabels(),
     commit: ({ entries, libraryID }, labels) => {
+      if (committedLibraryID !== libraryID) selectedEntryIDs.clear();
       committedLibraryID = libraryID;
       allEntries = entries;
       entriesByID = new Map(entries.map((entry) => [entry.id, entry]));
@@ -284,7 +300,8 @@ function createLibraryLoader(
       );
       api.setComparisonLayout(libraryID, comparisonLayout);
       filterLabels = labels;
-      applyFilters();
+      applyFilters(initialFilter?.documentID);
+      initialFilter = undefined;
     },
     isSelectedLibrary: (libraryID) => selectedLibraryID === libraryID,
     loadSnapshot: (libraryID) => api.loadLibrary(libraryID),
@@ -292,6 +309,7 @@ function createLibraryLoader(
       showError(error);
       if (loadedSnapshot) {
         committedLibraryID = undefined;
+        selectedEntryIDs.clear();
         allEntries = [];
         filteredEntries = [];
         entriesByID.clear();
@@ -304,6 +322,7 @@ function createLibraryLoader(
         return;
       }
       committedLibraryID = undefined;
+      selectedEntryIDs.clear();
       allEntries = [];
       entriesByID.clear();
       showState("error", "gallery-load-error");
@@ -318,6 +337,7 @@ function createLibraryLoader(
 
 function collectElements(): GalleryElements {
   return {
+    batchStatus: requireElement("batch-status"),
     collectionFilter: requireElement("collection-filter"),
     documentFilter: requireElement("document-filter"),
     errorBanner: requireElement("error-banner"),
@@ -356,6 +376,12 @@ function resolveGalleryApi(): FigureGalleryApi | undefined {
 }
 
 function bindControls(): void {
+  document.addEventListener("keydown", handleGalleryZoomKeydown, true);
+  document.addEventListener("wheel", handleGalleryZoomWheel, {
+    capture: true,
+    passive: false,
+  });
+  document.addEventListener("keydown", handleGallerySelectionKeydown);
   elements.galleryGrid.addEventListener("dragstart", handleGalleryDragStart);
   elements.galleryGrid.addEventListener("dragover", handleGalleryDragOver);
   elements.galleryGrid.addEventListener("drop", handleGalleryDrop);
@@ -389,6 +415,178 @@ function bindControls(): void {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(applyFilters, 120);
   });
+}
+
+function getSelectionOrder(): string[] {
+  if (viewMode !== "document-columns")
+    return filteredEntries.map(({ id }) => id);
+  return comparisonRows.flatMap((row) =>
+    comparisonDocumentIDs.flatMap((documentID) =>
+      (row.entries[String(documentID)]?.entryIDs ?? []).filter((id) =>
+        filteredEntryIDs.has(id),
+      ),
+    ),
+  );
+}
+
+function selectGalleryEntry(
+  entryID: string,
+  modifiers: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
+): void {
+  if (controlsDisabled || batchBusy || !filteredEntryIDs.has(entryID)) return;
+  closeGalleryContextMenu();
+  const additive = modifiers.ctrlKey || modifiers.metaKey;
+  const order = getSelectionOrder();
+  const anchor = selectionAnchorID ? order.indexOf(selectionAnchorID) : -1;
+  const end = order.indexOf(entryID);
+  if (modifiers.shiftKey && anchor >= 0 && end >= 0) {
+    if (!additive) selectedEntryIDs.clear();
+    for (const id of order.slice(
+      Math.min(anchor, end),
+      Math.max(anchor, end) + 1,
+    ))
+      selectedEntryIDs.add(id);
+  } else {
+    if (!additive) selectedEntryIDs.clear();
+    if (additive && selectedEntryIDs.has(entryID))
+      selectedEntryIDs.delete(entryID);
+    else selectedEntryIDs.add(entryID);
+    selectionAnchorID = entryID;
+  }
+  updateSelectionControls();
+}
+
+function selectAllGalleryEntries(): void {
+  if (controlsDisabled || batchBusy) return;
+  closeGalleryContextMenu();
+  for (const { id } of filteredEntries) selectedEntryIDs.add(id);
+  selectionAnchorID ??= getSelectionOrder()[0];
+  updateSelectionControls();
+}
+
+function clearGallerySelection(): void {
+  closeGalleryContextMenu();
+  selectedEntryIDs.clear();
+  selectionAnchorID = undefined;
+  updateSelectionControls();
+}
+
+function handleGallerySelectionKeydown(event: KeyboardEvent): void {
+  if (
+    event.defaultPrevented ||
+    event.isComposing ||
+    controlsDisabled ||
+    batchBusy
+  )
+    return;
+  const target = event.target;
+  if (
+    target instanceof Element &&
+    target.closest(
+      'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+    )
+  )
+    return;
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    event.key.toLowerCase() === "a"
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectAllGalleryEntries();
+  } else if (
+    event.key === "Delete" &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    selectedEntryIDs.size
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) void runSelectedBatch("delete");
+  } else if (event.key === "Escape" && selectedEntryIDs.size) {
+    event.preventDefault();
+    event.stopPropagation();
+    clearGallerySelection();
+  }
+}
+
+function updateSelectionControls(): void {
+  elements.galleryGrid
+    .querySelectorAll<HTMLElement>(".gallery-card")
+    .forEach((card) => {
+      const selected = selectedEntryIDs.has(card.dataset.id!);
+      card.classList.toggle("is-selected", selected);
+      card.setAttribute("aria-pressed", String(selected));
+    });
+}
+
+async function runSelectedBatch(action: "delete" | "export"): Promise<void> {
+  if (!galleryApi || controlsDisabled || batchBusy || !selectedEntryIDs.size)
+    return;
+  const entryIDs = [...selectedEntryIDs];
+  closeGalleryContextMenu();
+  batchBusy = true;
+  setControlsDisabled(true);
+  window.clearTimeout(searchTimer);
+  clearError();
+  try {
+    if (action === "delete") {
+      const counts = { figure: 0, formula: 0, table: 0 };
+      for (const id of entryIDs) {
+        const entry = entriesByID.get(id);
+        if (entry) counts[entry.kind]++;
+      }
+      const message = await localize("gallery-confirm-delete", {
+        count: entryIDs.length,
+        figures: counts.figure,
+        formulae: counts.formula,
+        tables: counts.table,
+      });
+      if (disposed || !window.confirm(message)) return;
+    }
+    elements.batchStatus.hidden = false;
+    setLocalizedText(elements.batchStatus, "gallery-batch-running", {
+      count: entryIDs.length,
+    });
+    const outcome = await galleryApi.runBatch(entryIDs, action);
+    if (disposed) return;
+    if (!outcome) {
+      elements.batchStatus.hidden = true;
+      elements.batchStatus.textContent = "";
+      elements.batchStatus.removeAttribute("data-l10n-id");
+      return;
+    }
+    if (action === "delete") {
+      const removed = new Set(outcome.completedIDs);
+      allEntries = allEntries.filter(({ id }) => !removed.has(id));
+      for (const id of removed) {
+        entriesByID.delete(id);
+        selectedEntryIDs.delete(id);
+      }
+      comparisonLayout = reconcileFigureGalleryComparisonLayout(
+        allEntries,
+        comparisonLayout,
+      );
+      applyFilters();
+      persistComparisonLayout();
+    }
+    setLocalizedText(
+      elements.batchStatus,
+      action === "delete" ? "gallery-batch-deleted" : "gallery-batch-exported",
+      { count: outcome.completedIDs.length },
+    );
+    if (outcome.errors.length) showError(outcome.errors.join("\n"));
+  } catch (error) {
+    if (!disposed) {
+      setLocalizedText(elements.batchStatus, "gallery-batch-error");
+      showError(error);
+    }
+  } finally {
+    batchBusy = false;
+    if (!disposed) setControlsDisabled(false);
+  }
 }
 
 function handleGalleryWindowDragOver(event: DragEvent): void {
@@ -646,24 +844,29 @@ function restoreGalleryViewport(viewport: GalleryViewport): void {
 }
 
 function handleGalleryContextMenu(event: MouseEvent): void {
-  if (viewMode !== "document-columns" || !comparisonLayout) return;
+  if (controlsDisabled || batchBusy) return;
   const target = event.target;
   if (!(target instanceof Element)) return;
   if (target.closest(".comparison-row-label-input")) return;
-  const entryElement = target.closest<HTMLElement>(
-    '[data-comparison-entry="true"]',
-  );
+  const entryElement = target.closest<HTMLElement>(".gallery-card");
   const labelElement = target.closest<HTMLElement>(".comparison-row-label");
   const rowID = entryElement?.dataset.rowId ?? labelElement?.dataset.rowId;
-  const sourceRow = comparisonLayout.rows.find(({ id }) => id === rowID);
-  if (!rowID || !sourceRow || (!entryElement && !sourceRow.isGroup)) return;
 
   let documentID: number | undefined;
   let entryID: string | undefined;
   if (entryElement) {
     documentID = Number(entryElement.dataset.documentId);
-    entryID = entryElement.dataset.entryId;
-    if (!Number.isInteger(documentID) || !entryID) return;
+    if (!Number.isInteger(documentID)) documentID = undefined;
+    entryID = entryElement.dataset.id;
+    if (!entryID) return;
+    if (!selectedEntryIDs.has(entryID)) {
+      selectGalleryEntry(entryID, {
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+      });
+    }
+    entryElement.focus({ preventScroll: true });
   }
 
   event.preventDefault();
@@ -680,7 +883,7 @@ function handleGalleryContextMenu(event: MouseEvent): void {
 }
 
 async function openGalleryContextMenu(
-  target: { documentID?: number; entryID?: string; rowID: string },
+  target: { documentID?: number; entryID?: string; rowID?: string },
   screenX: number,
   screenY: number,
   version: number,
@@ -689,8 +892,7 @@ async function openGalleryContextMenu(
   removeGalleryContextMenu();
   const layout = comparisonLayout;
   const sourceRow = layout?.rows.find(({ id }) => id === target.rowID);
-  if (!layout || !sourceRow) return;
-  const groupRows = layout.rows.filter(({ isGroup }) => isGroup);
+  const groupRows = layout?.rows.filter(({ isGroup }) => isGroup) ?? [];
   const rowLabels = await Promise.all(
     groupRows.map(
       async (row, index) =>
@@ -700,18 +902,30 @@ async function openGalleryContextMenu(
         })),
     ),
   );
-  const [addToGroupLabel, noOtherGroupsLabel, dissolveGroupLabel] =
-    await Promise.all([
-      localize("gallery-comparison-add-to-group"),
-      localize("gallery-comparison-no-other-groups"),
-      localize("gallery-comparison-dissolve-group"),
-    ]);
+  const [
+    addToGroupLabel,
+    noOtherGroupsLabel,
+    dissolveGroupLabel,
+    exportLabel,
+    deleteLabel,
+    selectAllLabel,
+    clearSelectionLabel,
+    selectedLabel,
+  ] = await Promise.all([
+    localize("gallery-comparison-add-to-group"),
+    localize("gallery-comparison-no-other-groups"),
+    localize("gallery-comparison-dissolve-group"),
+    localize("gallery-export-selected"),
+    localize("gallery-delete-selected"),
+    localize("gallery-select-all"),
+    localize("gallery-clear-selection"),
+    localize("gallery-selection-count", { count: selectedEntryIDs.size }),
+  ]);
   if (
     disposed ||
     requestID !== galleryContextMenuRequestID ||
     version !== renderVersion ||
-    comparisonLayout !== layout ||
-    !layout.rows.some(({ id }) => id === target.rowID)
+    comparisonLayout !== layout
   ) {
     return;
   }
@@ -726,7 +940,42 @@ async function openGalleryContextMenu(
   ) as GalleryContextMenuPopup;
   popup.id = GALLERY_CONTEXT_MENU_ID;
 
-  if (target.entryID && target.documentID !== undefined) {
+  popup.append(
+    createGalleryMenuItem(ownerDocument, selectedLabel, undefined, true),
+    createGalleryMenuItem(
+      ownerDocument,
+      exportLabel,
+      () => void runSelectedBatch("export"),
+      !selectedEntryIDs.size,
+    ),
+    createGalleryMenuItem(
+      ownerDocument,
+      deleteLabel,
+      () => void runSelectedBatch("delete"),
+      !selectedEntryIDs.size,
+    ),
+    ownerDocument.createXULElement("menuseparator"),
+    createGalleryMenuItem(
+      ownerDocument,
+      selectAllLabel,
+      selectAllGalleryEntries,
+      !filteredEntries.length,
+    ),
+    createGalleryMenuItem(
+      ownerDocument,
+      clearSelectionLabel,
+      clearGallerySelection,
+      !selectedEntryIDs.size,
+    ),
+  );
+
+  if (
+    sourceRow &&
+    target.entryID &&
+    target.documentID !== undefined &&
+    selectedEntryIDs.size === 1
+  ) {
+    popup.append(ownerDocument.createXULElement("menuseparator"));
     const groupMenu = ownerDocument.createXULElement("menu");
     groupMenu.setAttribute("label", addToGroupLabel);
     const groupPopup = ownerDocument.createXULElement("menupopup");
@@ -761,13 +1010,11 @@ async function openGalleryContextMenu(
     popup.append(groupMenu);
   }
 
-  if (sourceRow.isGroup) {
-    if (target.entryID) {
-      popup.append(ownerDocument.createXULElement("menuseparator"));
-    }
+  if (sourceRow?.isGroup) {
+    popup.append(ownerDocument.createXULElement("menuseparator"));
     popup.append(
       createGalleryMenuItem(ownerDocument, dissolveGroupLabel, () => {
-        dissolveComparisonRow(target.rowID);
+        dissolveComparisonRow(sourceRow.id);
       }),
     );
   }
@@ -940,7 +1187,13 @@ function resetFilters(): void {
 }
 
 function toggleToolbar(): void {
-  const collapsed = elements.filterToolbar.classList.toggle("is-collapsed");
+  const collapsed = !elements.filterToolbar.classList.contains("is-collapsed");
+  setToolbarCollapsed(collapsed);
+  if (collapsed) elements.keywordFilter.focus();
+}
+
+function setToolbarCollapsed(collapsed: boolean): void {
+  elements.filterToolbar.classList.toggle("is-collapsed", collapsed);
   elements.toolbarToggle.setAttribute("aria-expanded", String(!collapsed));
   const messageID = collapsed
     ? "gallery-toolbar-expand"
@@ -957,7 +1210,6 @@ function toggleToolbar(): void {
     elements.toolbarToggle.setAttribute("aria-label", label);
   }
   if (collapsed) closeScalePopover();
-  if (collapsed) elements.keywordFilter.focus();
 }
 
 function toggleScalePopover(): void {
@@ -977,6 +1229,46 @@ function handleScaleOutsidePointerDown(event: PointerEvent): void {
   const target = event.target;
   if (target instanceof Node && elements.scaleControl.contains(target)) return;
   closeScalePopover();
+}
+
+function handleGalleryZoomKeydown(event: KeyboardEvent): void {
+  if (
+    disposed ||
+    event.defaultPrevented ||
+    event.isComposing ||
+    event.altKey ||
+    !(event.ctrlKey || event.metaKey)
+  )
+    return;
+  const direction =
+    event.key === "+" || event.key === "=" || event.code === "NumpadAdd"
+      ? 1
+      : event.key === "-" || event.code === "NumpadSubtract"
+        ? -1
+        : 0;
+  if (!direction) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!controlsDisabled && !batchBusy)
+    setGalleryImageScale(imageScale + direction * GALLERY_SCALE_STEP, true);
+}
+
+function handleGalleryZoomWheel(event: WheelEvent): void {
+  if (
+    disposed ||
+    event.defaultPrevented ||
+    event.altKey ||
+    !(event.ctrlKey || event.metaKey) ||
+    !event.deltaY
+  )
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!controlsDisabled && !batchBusy)
+    setGalleryImageScale(
+      imageScale - Math.sign(event.deltaY) * GALLERY_SCALE_STEP,
+      true,
+    );
 }
 
 function handleScaleKeydown(event: KeyboardEvent): void {
@@ -1211,14 +1503,17 @@ function scheduleFilterUpdate(): void {
   });
 }
 
-function applyFilters(): void {
+function applyFilters(documentID?: number): void {
   const labels = filterLabels;
   if (!labels) return;
   const facets = buildGalleryFacetState(
     allEntries,
     {
       collectionID: elements.collectionFilter.value,
-      documentID: elements.documentFilter.value,
+      documentID:
+        documentID === undefined
+          ? elements.documentFilter.value
+          : String(documentID),
       keyword: elements.keywordFilter.value.trim(),
       kind: elements.typeFilter.value,
       year: elements.yearFilter.value,
@@ -1229,6 +1524,12 @@ function applyFilters(): void {
   activeKeyword = facets.filters.keyword;
   filteredEntries = filterGalleryEntries(allEntries, facets.filters);
   filteredEntryIDs = new Set(filteredEntries.map(({ id }) => id));
+  if (selectionAnchorID && !filteredEntryIDs.has(selectionAnchorID))
+    selectionAnchorID = undefined;
+  for (const id of selectedEntryIDs) {
+    if (!filteredEntryIDs.has(id)) selectedEntryIDs.delete(id);
+  }
+  updateSelectionControls();
   renderResults();
 }
 
@@ -1977,11 +2278,14 @@ function createCard(
   const card = document.createElement("article");
   card.className = "gallery-card";
   card.classList.toggle("is-comparison", comparison);
+  card.classList.toggle("is-selected", selectedEntryIDs.has(entry.id));
   card.draggable = comparison;
   card.dataset.kind = entry.kind;
   card.dataset.id = entry.id;
   card.tabIndex = 0;
   card.setAttribute("role", "button");
+  card.setAttribute("aria-pressed", String(selectedEntryIDs.has(entry.id)));
+  card.setAttribute("aria-label", entry.tag);
 
   const media = document.createElement("div");
   media.className = "gallery-media";
@@ -2035,15 +2339,22 @@ function createCard(
   if (comparison) body.append(labels, meta, caption);
   else body.append(labels, title, meta, caption);
   card.append(media, body);
+  card.addEventListener("click", (event) => {
+    if (event.detail > 1) return;
+    selectGalleryEntry(entry.id, event);
+    card.focus({ preventScroll: true });
+  });
 
-  card.addEventListener(
-    "dblclick",
-    () => void openSource(card, entry.id, version),
-  );
+  card.addEventListener("dblclick", (event) => {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !batchBusy)
+      void openSource(card, entry.id, version);
+  });
   card.addEventListener("keydown", (event) => {
+    if (event.target !== card || batchBusy) return;
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
-    void openSource(card, entry.id, version);
+    if (event.key === " ") selectGalleryEntry(entry.id, event);
+    else void openSource(card, entry.id, version);
   });
   return card;
 }
@@ -2218,6 +2529,8 @@ async function openSource(
 
 function dispose(): void {
   disposed = true;
+  document.removeEventListener("keydown", handleGalleryZoomKeydown, true);
+  document.removeEventListener("wheel", handleGalleryZoomWheel, true);
   closeGalleryContextMenu();
   activeDrag = undefined;
   galleryDragPointer = undefined;
@@ -2259,6 +2572,8 @@ function setVisible(element: HTMLElement, visible: boolean): void {
 }
 
 function setControlsDisabled(disabled: boolean): void {
+  controlsDisabled = disabled;
+  elements.galleryGrid.inert = disabled;
   const controls = document.querySelectorAll("button, input, select");
   for (let index = 0; index < controls.length; index++) {
     const control = controls.item(index) as
@@ -2270,6 +2585,7 @@ function setControlsDisabled(disabled: boolean): void {
     if (control === elements.toolbarToggle) continue;
     control.disabled = disabled;
   }
+  updateSelectionControls();
 }
 
 function showError(error: unknown): void {

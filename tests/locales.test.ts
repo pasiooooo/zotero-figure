@@ -52,7 +52,7 @@ test("labels comparison rows as dimensions in every runtime locale", () => {
 test("runtime Fluent contains every message requested by source code", () => {
   const runtimeKeys = new Set(readKeys("addon/locale/en-US/addon.ftl"));
   const requestedKeys = findTypeScriptFiles("src")
-    .filter((file) => file !== "src/utils/locale.ts")
+    .filter((file) => file !== path.join("src", "utils", "locale.ts"))
     .flatMap((file) =>
       [...readFileSync(file, "utf8").matchAll(/getString\(\s*"([\w-]+)"/g)].map(
         (match) => match[1],

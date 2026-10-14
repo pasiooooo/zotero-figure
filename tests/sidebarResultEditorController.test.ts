@@ -38,15 +38,16 @@ test("builds the comment dialog and returns the saved result", async () => {
   ]);
   assert.deepEqual(dialog.features, {
     centerscreen: true,
-    fitContent: true,
+    fitContent: false,
+    height: 420,
     noDialogMode: true,
     resizable: true,
+    width: 640,
   });
   assert.equal(textarea.attributes.maxlength, 10_000);
-  assert.equal(textarea.attributes.rows, 2);
-  assert.equal(textarea.styles.height, "4.1em");
-  assert.equal(textarea.styles.maxHeight, "4.1em");
-  assert.equal(textarea.styles.minHeight, "4.1em");
+  assert.equal(textarea.attributes.rows, 6);
+  assert.equal(textarea.styles.flex, "1");
+  assert.equal(textarea.styles.maxHeight, undefined);
   assert.equal(textarea.styles.resize, "none");
 
   dialog.windowTarget.dispatchEvent(new Event("load"));
@@ -56,6 +57,20 @@ test("builds the comment dialog and returns the saved result", async () => {
   dialog.finish("save");
 
   assert.equal(await request, edited);
+  harness.controller.dispose();
+});
+
+test("bounds the comment editor's initial size on a small screen", async () => {
+  const harness = createHarness();
+  harness.controller.setContext({
+    defaultView: { screen: { availWidth: 500, availHeight: 400 } },
+  } as Document);
+  const request = harness.controller.editComment(createResult("small-screen"));
+  const dialog = harness.dialogs[0];
+  assert.equal(dialog.features?.width, 468);
+  assert.equal(dialog.features?.height, 368);
+  dialog.finish("cancel");
+  assert.equal(await request, undefined);
   harness.controller.dispose();
 });
 

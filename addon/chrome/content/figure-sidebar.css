@@ -456,6 +456,7 @@
 }
 
 .zoterofigure-sidebar-card {
+  user-select: none;
   background: var(--material-background);
   border-radius: 5px;
   box-shadow: 0 0 0 1px var(--fill-quinary);
@@ -470,6 +471,29 @@
 .zoterofigure-sidebar-card:focus {
   outline: 2px solid var(--accent-blue, #3b82f6);
   outline-offset: -2px;
+}
+
+.zoterofigure-sidebar-card.is-selected {
+  background: color-mix(
+    in srgb,
+    var(--accent-blue, #3b82f6) 12%,
+    var(--material-background)
+  );
+  outline: 2px solid var(--accent-blue, #3b82f6);
+  outline-offset: -2px;
+}
+
+.zoterofigure-card-pin[aria-pressed="true"] {
+  color: var(--accent-blue, #3b82f6);
+  background: var(--fill-quinary);
+}
+
+.zoterofigure-card-image.is-dragging {
+  cursor: grabbing;
+}
+
+.zoterofigure-sidebar-status {
+  white-space: pre-wrap;
 }
 
 .zoterofigure-sidebar-card.zoterofigure-pinned-card {
@@ -490,6 +514,11 @@
 
 .zoterofigure-pinned-card:focus {
   outline: none;
+}
+
+.zoterofigure-pinned-card.is-pinned.is-selected {
+  outline: 2px solid var(--accent-blue, #3b82f6);
+  outline-offset: -2px;
 }
 
 .zoterofigure-pinned-card > header,

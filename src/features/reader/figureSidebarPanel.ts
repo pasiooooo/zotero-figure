@@ -1,4 +1,6 @@
 import type { Rect } from "../../domain/layout";
+import type { FigureGalleryBatchResult } from "../../domain/figureGallery";
+import { layoutPinnedCards, type Point } from "../../domain/pinnedFigureCard";
 import {
   countFigureSidebarItems,
   filterAndSortFigureSidebarItems,
@@ -46,7 +48,6 @@ const TAB_ID = "zoterofigure-sidebar-tab";
 const STYLE_ID = "zoterofigure-sidebar-style";
 const FILTER_POPOVER_ID = "zoterofigure-filter-results";
 const FILTER_POPOVER_CLOSE_DELAY_MS = 140;
-const IMAGE_SINGLE_CLICK_DELAY_MS = 220;
 const PINNED_CARD_Z_INDEX_BASE = 2_000_000_000;
 
 type AnalysisProgressState = "cancelled" | "error" | "running" | "success";
@@ -68,6 +69,9 @@ export interface FigureSidebarPanelOptions {
   onAddAllToNote(results: readonly StoredFigureResult[]): Promise<void>;
   onAddToNote(result: StoredFigureResult): Promise<void>;
   onAnalyze(): void | Promise<void>;
+  onOpenGallery(): void;
+  onSelectRegion(): void;
+  onRecognizeRegion(result: StoredFigureResult): Promise<void>;
   onCancelAnalysis(): void;
   onCacheTranslations(
     contextKey: string,
@@ -98,6 +102,10 @@ export interface FigureSidebarPanelOptions {
     result: StoredFigureResult,
   ): Promise<FormulaLatexEditSnapshot | undefined>;
   onRemove(result: StoredFigureResult): Promise<void>;
+  onRunBatch(
+    resultIDs: readonly string[],
+    action: "delete" | "export",
+  ): Promise<FigureGalleryBatchResult | undefined>;
   onRerecognizeLatex(result: StoredFigureResult): Promise<StoredFigureResult>;
   onResultsDisplayed(results: readonly StoredFigureResult[]): void;
   onSaveImage(result: StoredFigureResult): Promise<void>;
@@ -107,6 +115,7 @@ export interface FigureSidebarPanelOptions {
 }
 
 type MenuPopup = XUL.MenuPopup & {
+  openPopupAtScreen(x: number, y: number, isContextMenu: boolean): void;
   openPopup(
     anchor: Element,
     position: string,
@@ -168,7 +177,10 @@ export class FigureSidebarPanel {
   private readonly resultEditors: SidebarResultEditorController;
   private readonly resultCards = new Map<string, HTMLElement>();
   private resultScrollTimerID?: number;
-  private imageNavigationTimerID?: number;
+  private readonly selectedResultIDs = new Set<string>();
+  private selectionAnchorID?: string;
+  private batchBusy = false;
+  private batchStatus?: string;
   private readonly pendingPinnedCards = new Map<string, number>();
   private readonly pinnedCards = new Map<string, PinnedSidebarCard>();
   private pinGeneration = 0;
@@ -210,6 +222,214 @@ export class FigureSidebarPanel {
   private readonly handleOwnTabClick = (event: MouseEvent): void => {
     this.openPanelFromTab(event);
   };
+
+  private readonly handleSelectionKeyDown = (event: KeyboardEvent): void => {
+    const target = event.target as Element | null;
+    if (
+      event.defaultPrevented ||
+      event.isComposing ||
+      this.batchBusy ||
+      !this.active ||
+      !this.panel?.contains(target)
+    )
+      return;
+    if (
+      target?.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+      )
+    )
+      return;
+    if (
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      event.key.toLowerCase() === "a"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectAllResults();
+    } else if (
+      event.key === "Delete" &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      this.selectedResultIDs.size
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) void this.runSelectedBatch("delete");
+    } else if (event.key === "Escape" && this.selectedResultIDs.size) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectedResultIDs.clear();
+      this.selectionAnchorID = undefined;
+      this.updateSelection();
+    }
+  };
+
+  private readonly handlePanelContextMenu = (event: MouseEvent): void => {
+    const target = event.target as Element | null;
+    if (
+      this.batchBusy ||
+      !this.panel?.contains(target) ||
+      target?.closest(
+        'input, textarea, select, [contenteditable="true"], .zoterofigure-sidebar-controls',
+      )
+    )
+      return;
+    const clickedCard = target?.closest<HTMLElement>(
+      ".zoterofigure-sidebar-card",
+    );
+    const id =
+      clickedCard?.dataset.resultId ??
+      this.selectedResultIDs.values().next().value;
+    const result = id ? this.getCurrentResult(id) : undefined;
+    const card = id ? this.resultCards.get(id) : undefined;
+    if (!result || !card) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!this.selectedResultIDs.has(result.id))
+      this.selectResult(result.id, {
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+      });
+    card.focus({ preventScroll: true });
+    const anchor = card.querySelector<HTMLButtonElement>(
+      ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+    );
+    if (anchor) this.openMenu(anchor, result, event);
+  };
+
+  private selectResult(
+    resultID: string,
+    modifiers: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
+  ): void {
+    if (this.batchBusy || !this.resultCards.has(resultID)) return;
+    this.closeMenu();
+    const order = [...this.resultCards.keys()];
+    const anchor = this.selectionAnchorID
+      ? order.indexOf(this.selectionAnchorID)
+      : -1;
+    const end = order.indexOf(resultID);
+    const additive = modifiers.ctrlKey || modifiers.metaKey;
+    if (modifiers.shiftKey && anchor >= 0) {
+      if (!additive) this.selectedResultIDs.clear();
+      for (const id of order.slice(
+        Math.min(anchor, end),
+        Math.max(anchor, end) + 1,
+      ))
+        this.selectedResultIDs.add(id);
+    } else {
+      if (!additive) this.selectedResultIDs.clear();
+      if (additive && this.selectedResultIDs.has(resultID))
+        this.selectedResultIDs.delete(resultID);
+      else this.selectedResultIDs.add(resultID);
+      this.selectionAnchorID = resultID;
+    }
+    this.updateSelection();
+  }
+
+  private selectAllResults(): void {
+    if (this.batchBusy) return;
+    for (const id of this.resultCards.keys()) this.selectedResultIDs.add(id);
+    this.selectionAnchorID ??= this.resultCards.keys().next().value;
+    this.updateSelection();
+  }
+
+  private updateSelection(): void {
+    for (const [id, card] of this.resultCards) {
+      const selected = this.selectedResultIDs.has(id);
+      card.classList.toggle("is-selected", selected);
+      card.setAttribute("aria-selected", String(selected));
+    }
+  }
+
+  private async runSelectedBatch(action: "delete" | "export"): Promise<void> {
+    if (this.batchBusy || !this.selectedResultIDs.size) return;
+    const document = this.document;
+    if (!document) return;
+    const restoreFocus = this.panel?.contains(document.activeElement);
+    const selected = (this.results ?? []).filter(({ id }) =>
+      this.selectedResultIDs.has(id),
+    );
+    if (!selected.length) return;
+    this.batchBusy = true;
+    this.closeMenu();
+    try {
+      if (action === "delete") {
+        const counts = countFigureSidebarItems(selected, (result) => result);
+        if (
+          !this.options.ownerWindow.confirm(
+            getString("gallery-confirm-delete", {
+              args: {
+                count: selected.length,
+                figures: counts.figure,
+                formulae: counts.formula,
+                tables: counts.table,
+              },
+            }),
+          )
+        )
+          return;
+      }
+      if (this.loadingResults) {
+        this.renderRevision++;
+        this.loadingResults = false;
+        this.reloadAfterLoad = true;
+      }
+      if (this.panelContent) this.panelContent.inert = true;
+      const outcome = await this.options.onRunBatch(
+        selected.map(({ id }) => id),
+        action,
+      );
+      if (!outcome || this.disposed || this.document !== document) return;
+      if (action === "delete") {
+        const removed = new Set(outcome.completedIDs);
+        this.results = (this.results ?? []).filter(
+          ({ id }) => !removed.has(id),
+        );
+        for (const id of removed) this.selectedResultIDs.delete(id);
+      }
+      this.batchStatus = getString(
+        action === "delete"
+          ? "gallery-batch-deleted"
+          : "gallery-batch-exported",
+        { args: { count: outcome.completedIDs.length } },
+      );
+      if (outcome.errors.length)
+        this.batchStatus += `\n${outcome.errors.join("\n")}`;
+      this.render();
+    } catch (error) {
+      Zotero.logError(toError(error));
+      if (!this.disposed && this.document === document) {
+        this.batchStatus = toError(error).message;
+        this.render();
+      }
+    } finally {
+      this.batchBusy = false;
+      if (this.panelContent) this.panelContent.inert = false;
+      if (
+        restoreFocus &&
+        !this.disposed &&
+        this.document === document &&
+        (document.activeElement === document.body ||
+          document.activeElement === document.documentElement)
+      ) {
+        const selectedID = this.selectedResultIDs.values().next().value;
+        (this.resultCards.get(selectedID ?? "") ?? this.panel)?.focus({
+          preventScroll: true,
+        });
+      }
+      if (
+        this.reloadAfterLoad &&
+        !this.disposed &&
+        this.document === document
+      ) {
+        this.reloadAfterLoad = false;
+        this.reloadResults();
+      }
+    }
+  }
 
   private openPanelFromTab(event: MouseEvent): void {
     event.preventDefault();
@@ -344,12 +564,15 @@ export class FigureSidebarPanel {
   }
 
   private detachDocument(): void {
+    this.selectedResultIDs.clear();
+    this.selectionAnchorID = undefined;
+    this.batchStatus = undefined;
     this.renderRevision++;
     this.pinGeneration++;
     this.resultEditors.setContext(undefined);
     this.closeFilterPopover();
     this.cancelResultScroll();
-    this.cancelImageNavigation();
+
     this.disposePinnedCards();
     this.imageLoads.setActive(false);
     this.imageLoads.setViewport(undefined);
@@ -450,9 +673,20 @@ export class FigureSidebarPanel {
       this.panel = this.document.createElement("div");
       this.panel.id = PANEL_ID;
       this.panel.className = "viewWrapper zoterofigure-panel-wrapper";
+      this.panel.tabIndex = -1;
       this.panel.setAttribute("role", "tabpanel");
       this.panel.setAttribute("data-tabstop", "1");
       this.panel.setAttribute("aria-labelledby", TAB_ID);
+      this.panel.addEventListener("keydown", this.handleSelectionKeyDown);
+      this.panel.addEventListener(
+        "contextmenu",
+        this.handlePanelContextMenu,
+        true,
+      );
+      // The Reader's window-level focus manager cancels right pointer presses.
+      this.panel.addEventListener("pointerdown", (event) => {
+        if (event.button === 2) event.stopPropagation();
+      });
       this.panelContent = this.document.createElement("div");
       this.panelContent.className = "zoterofigure-sidebar-panel";
       this.panel.append(this.panelContent);
@@ -467,7 +701,7 @@ export class FigureSidebarPanel {
     const document = this.document;
     const panelContent = this.panelContent;
     if (!document || !panelContent) return;
-    this.cancelImageNavigation();
+
     if (this.results !== undefined) {
       this.renderContent(panelContent, this.results);
       return;
@@ -484,6 +718,10 @@ export class FigureSidebarPanel {
   }
 
   private requestResults(panelContent: HTMLDivElement, force = false): void {
+    if (this.batchBusy) {
+      this.reloadAfterLoad = true;
+      return;
+    }
     if (this.loadingResults) {
       if (force) this.reloadAfterLoad = true;
       return;
@@ -536,7 +774,7 @@ export class FigureSidebarPanel {
   ): void {
     const document = this.document;
     if (!document) return;
-    this.cancelImageNavigation();
+
     this.closeFilterPopover();
     this.closeMenu();
     this.reconcilePinnedCards(results);
@@ -553,6 +791,9 @@ export class FigureSidebarPanel {
     );
     const list = document.createElement("div");
     list.className = "zoterofigure-sidebar-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-multiselectable", "true");
+    list.setAttribute("aria-label", getString("sidebar-title"));
     if (!filtered.length) {
       if (
         shouldShowFigureSidebarEmptyState(
@@ -566,6 +807,19 @@ export class FigureSidebarPanel {
       for (const result of filtered) list.append(this.createCard(result));
     }
     const children: HTMLElement[] = [this.createControls(document, results)];
+    const visibleIDs = new Set(filtered.map(({ id }) => id));
+    for (const id of this.selectedResultIDs)
+      if (!visibleIDs.has(id)) this.selectedResultIDs.delete(id);
+    if (this.selectionAnchorID && !visibleIDs.has(this.selectionAnchorID))
+      this.selectionAnchorID = undefined;
+    this.updateSelection();
+    if (this.batchStatus) {
+      const status = document.createElement("div");
+      status.className = "zoterofigure-sidebar-status";
+      status.setAttribute("role", "status");
+      status.textContent = this.batchStatus;
+      children.push(status);
+    }
     if (this.analysisProgress) {
       children.push(
         this.createAnalysisProgress(document, this.analysisProgress),
@@ -745,6 +999,16 @@ export class FigureSidebarPanel {
       (this.pdfTranslateAvailable = isPdfTranslateAvailable());
     actions.append(
       this.createAnalysisButton(document, analyzing),
+      this.createActionButton(document, "sidebar-open-gallery", "expand", () =>
+        this.options.onOpenGallery(),
+      ),
+      this.createActionButton(
+        document,
+        "sidebar-select-region",
+        "region",
+        () => this.options.onSelectRegion(),
+        analyzing,
+      ),
       ...(translationAvailable
         ? [
             this.createActionButton(
@@ -844,10 +1108,12 @@ export class FigureSidebarPanel {
     labelKey: string,
     iconKind:
       | "annotation"
+      | "expand"
       | "languages"
       | "note"
       | "plugin"
       | "refresh"
+      | "region"
       | "trash",
     action: () => void | Promise<void>,
     disabled = false,
@@ -1274,7 +1540,12 @@ export class FigureSidebarPanel {
     const card = document.createElement("article");
     card.className = "zoterofigure-sidebar-card";
     card.dataset.resultId = result.id;
-    card.tabIndex = -1;
+    card.tabIndex = 0;
+    card.setAttribute("role", "option");
+    card.setAttribute(
+      "aria-selected",
+      String(this.selectedResultIDs.has(result.id)),
+    );
     card.setAttribute("aria-label", this.getCardNavigationLabel(result));
 
     const header = document.createElement("header");
@@ -1283,12 +1554,32 @@ export class FigureSidebarPanel {
     end.className = "zoterofigure-card-end";
     end.append(this.createMenuButton(document, result));
     header.append(start, end);
-    header.addEventListener("click", () => this.goToPage(result));
 
     const media = this.createCardMedia(document, result);
     this.bindCardMediaInteractions(media, result, card);
     const comment = this.createComment(document, result);
     card.append(header, media, comment);
+    card.addEventListener("click", (event) => {
+      if (
+        event.detail > 1 ||
+        (event.target as Element | null)?.closest("button")
+      )
+        return;
+      this.selectResult(result.id, event);
+      card.focus({ preventScroll: true });
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.target !== card || this.batchBusy) return;
+      if (event.key === " ") {
+        event.preventDefault();
+        this.selectResult(result.id, event);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        void this.goToPage(this.getCurrentResult(result.id) ?? result).catch(
+          (error) => Zotero.logError(toError(error)),
+        );
+      }
+    });
     this.resultCards.set(result.id, card);
     return card;
   }
@@ -1298,18 +1589,79 @@ export class FigureSidebarPanel {
     result: StoredFigureResult,
     card: HTMLElement,
   ): void {
-    media.addEventListener("click", (event) => {
-      if (event.detail > 1) return;
-      this.scheduleImageNavigation(this.getCurrentResult(result.id) ?? result);
-    });
     media.addEventListener("dblclick", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.cancelImageNavigation();
-      void this.pinCard(this.getCurrentResult(result.id) ?? result, card).catch(
+      if (this.batchBusy || event.ctrlKey || event.metaKey || event.shiftKey)
+        return;
+      void this.goToPage(this.getCurrentResult(result.id) ?? result).catch(
         (error) => Zotero.logError(toError(error)),
       );
     });
+    let start: { x: number; y: number; pointerID: number } | undefined;
+    let suppressClick = false;
+    media.addEventListener("dragstart", (event) => event.preventDefault());
+    media.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || !event.isPrimary || this.batchBusy) return;
+      start = {
+        x: event.clientX,
+        y: event.clientY,
+        pointerID: event.pointerId,
+      };
+      media.setPointerCapture(event.pointerId);
+    });
+    media.addEventListener("pointermove", (event) => {
+      if (!start || start.pointerID !== event.pointerId) return;
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 6) {
+        event.preventDefault();
+        media.classList.add("is-dragging");
+      }
+    });
+    const finish = (event: PointerEvent): void => {
+      if (!start || start.pointerID !== event.pointerId) return;
+      const moved =
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 6;
+      start = undefined;
+      media.classList.remove("is-dragging");
+      if (media.hasPointerCapture(event.pointerId))
+        media.releasePointerCapture(event.pointerId);
+      if (!moved || event.type !== "pointerup") return;
+      suppressClick = true;
+      this.options.ownerWindow.setTimeout(() => {
+        suppressClick = false;
+      }, 50);
+      const bounds = this.panel?.getBoundingClientRect();
+      if (
+        !bounds ||
+        (event.clientX >= bounds.left &&
+          event.clientX <= bounds.right &&
+          event.clientY >= bounds.top &&
+          event.clientY <= bounds.bottom)
+      )
+        return;
+      event.preventDefault();
+      void this.pinSelectedCards(
+        this.getCurrentResult(result.id) ?? result,
+        card,
+        {
+          x: event.clientX - 32,
+          y: event.clientY - 20,
+        },
+      ).catch((error) => Zotero.logError(toError(error)));
+    };
+    media.addEventListener("pointerup", finish);
+    media.addEventListener("pointercancel", finish);
+    media.addEventListener("lostpointercapture", finish);
+    media.addEventListener(
+      "click",
+      (event) => {
+        if (!suppressClick) return;
+        event.preventDefault();
+        event.stopPropagation();
+        suppressClick = false;
+      },
+      true,
+    );
   }
 
   private createCardMedia(
@@ -1366,26 +1718,73 @@ export class FigureSidebarPanel {
     });
   }
 
-  private scheduleImageNavigation(result: StoredFigureResult): void {
-    this.cancelImageNavigation();
-    this.imageNavigationTimerID = this.options.ownerWindow.setTimeout(() => {
-      this.imageNavigationTimerID = undefined;
-      void this.goToPage(result).catch((error) =>
-        Zotero.logError(toError(error)),
-      );
-    }, IMAGE_SINGLE_CLICK_DELAY_MS);
+  private async pinSelectedCards(
+    result: StoredFigureResult,
+    sourceCard: HTMLElement,
+    position?: Point,
+  ): Promise<void> {
+    const generation = this.pinGeneration;
+    const selected = this.selectedResultIDs.has(result.id)
+      ? [...this.resultCards].filter(([id]) => this.selectedResultIDs.has(id))
+      : [[result.id, sourceCard] as const];
+    const newCards: PinnedSidebarCard[] = [];
+    const errors: string[] = [];
+    for (const [id, card] of selected) {
+      if (this.disposed || generation !== this.pinGeneration) break;
+      const current = this.getCurrentResult(id);
+      if (!current) continue;
+      try {
+        const created = await this.pinCard(current, card, position);
+        if (created) newCards.push(created);
+      } catch (error) {
+        Zotero.logError(toError(error));
+        errors.push(`${current.tag}: ${toError(error).message}`);
+      }
+    }
+    if (!this.disposed && generation === this.pinGeneration) {
+      if (newCards.length > 1) this.arrangeNewPinnedCards(newCards, position);
+    }
+    if (errors.length && !this.disposed && generation === this.pinGeneration) {
+      this.batchStatus = errors.join("\n");
+      this.render();
+    }
   }
 
-  private cancelImageNavigation(): void {
-    if (this.imageNavigationTimerID === undefined) return;
-    this.options.ownerWindow.clearTimeout(this.imageNavigationTimerID);
-    this.imageNavigationTimerID = undefined;
+  private arrangeNewPinnedCards(
+    cards: readonly PinnedSidebarCard[],
+    position?: Point,
+  ): void {
+    const document = this.document;
+    if (!document || !cards.length) return;
+    const margin = 12;
+    const root = document.documentElement;
+    const sidebarRight = this.panel?.getBoundingClientRect().right ?? 0;
+    const left = Math.min(
+      Math.max(margin, sidebarRight + margin),
+      root.clientWidth / 2,
+    );
+    const area = {
+      x: left,
+      y: margin,
+      width: Math.max(1, root.clientWidth - left - margin),
+      height: Math.max(1, root.clientHeight - margin * 2),
+    };
+    const cells = layoutPinnedCards(
+      cards.map(({ element }) => ({
+        width: element.offsetWidth,
+        height: element.offsetHeight,
+      })),
+      area,
+      position ?? area,
+    );
+    cards.forEach((card, index) => card.fitTo(cells[index]));
   }
 
   private async pinCard(
     result: StoredFigureResult,
     sourceCard: HTMLElement,
-  ): Promise<void> {
+    position?: Point,
+  ): Promise<PinnedSidebarCard | undefined> {
     const existing = this.pinnedCards.get(result.id);
     if (existing) {
       this.requestPinnedCardRefresh(existing, result);
@@ -1434,6 +1833,9 @@ export class FigureSidebarPanel {
       };
 
       const element = sourceCard.cloneNode(true) as HTMLElement;
+      element.classList.remove("is-selected");
+      element.removeAttribute("aria-selected");
+      element.setAttribute("role", "group");
       orphanedElement = element;
       const imageContainer = element.querySelector<HTMLElement>(
         ".zoterofigure-card-image",
@@ -1489,6 +1891,7 @@ export class FigureSidebarPanel {
         releaseImageURL: blobURL.release,
         sourceGeometry,
         stagger: this.pinnedCards.size * 18,
+        position,
       });
       const entry: PinnedSidebarCard = Object.assign(card, {
         snapshot: this.createPinnedCardResultSnapshot(result),
@@ -1501,6 +1904,7 @@ export class FigureSidebarPanel {
       if (currentResult && currentResult !== result) {
         this.requestPinnedCardRefresh(entry, currentResult);
       }
+      return entry;
     } finally {
       orphanedElement?.remove();
       releaseOrphanedImageURL?.();
@@ -1518,9 +1922,11 @@ export class FigureSidebarPanel {
     const getCurrentResult = (): StoredFigureResult =>
       this.getCurrentResult(result.id) ?? result;
     const header = element.querySelector<HTMLElement>("header");
-    header?.addEventListener("click", (event) => {
-      if (event.detail > 1) return;
-      this.scheduleImageNavigation(getCurrentResult());
+    header?.addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+      void this.goToPage(getCurrentResult()).catch((error) =>
+        Zotero.logError(toError(error)),
+      );
     });
 
     const menuHost = element.querySelector<HTMLElement>(
@@ -1536,9 +1942,11 @@ export class FigureSidebarPanel {
     const image = element.querySelector<HTMLElement>(
       ".zoterofigure-card-image",
     );
-    image?.addEventListener("click", (event) => {
-      if (event.detail > 1) return;
-      this.scheduleImageNavigation(getCurrentResult());
+    image?.addEventListener("dblclick", (event) => {
+      event.stopPropagation();
+      void this.goToPage(getCurrentResult()).catch((error) =>
+        Zotero.logError(toError(error)),
+      );
     });
   }
 
@@ -1549,7 +1957,8 @@ export class FigureSidebarPanel {
   private closePinnedCard(resultID: string): void {
     const entry = this.pinnedCards.get(resultID);
     if (!entry) return;
-    this.cancelImageNavigation();
+    this.pinGeneration++;
+
     if (this.menuAnchor && entry.element.contains(this.menuAnchor)) {
       this.closeMenu();
     }
@@ -1710,7 +2119,9 @@ export class FigureSidebarPanel {
     if (this.menuAnchor && element.contains(this.menuAnchor)) this.closeMenu();
     element.setAttribute("aria-label", content.ariaLabel);
     start.replaceWith(content.start);
-    menuHost.replaceChildren(content.menuButton);
+    menuHost
+      .querySelector(".zoterofigure-card-menu:not(.zoterofigure-card-pin)")
+      ?.replaceWith(content.menuButton);
     comment.replaceWith(content.comment);
     imageContainer.style.aspectRatio = "";
     imageContainer.classList.add("is-loaded");
@@ -1731,28 +2142,31 @@ export class FigureSidebarPanel {
     displayComment = this.getDisplayComment(result),
   ): HTMLElement {
     const text = displayComment.trim();
-    if (!text) {
-      const empty = document.createElement("div");
-      empty.className = "zoterofigure-card-comment is-empty";
-      empty.textContent = getString("sidebar-no-caption");
-      return empty;
-    }
-
     const expanded = this.expandedComments.has(result.id);
     const comment = document.createElement("button");
     comment.type = "button";
     comment.className = "zoterofigure-card-comment";
-    this.applyCommentExpansion(comment, expanded);
+    comment.title = getString("sidebar-edit-caption-hint");
+    if (text) this.applyCommentExpansion(comment, expanded);
+    else comment.classList.add("is-empty");
     const textNode = document.createElement("span");
     textNode.className = "zoterofigure-card-comment-text";
-    textNode.textContent = text;
+    textNode.textContent = text || getString("sidebar-no-caption");
     comment.append(textNode);
     comment.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (!text || event.detail > 1) return;
       this.setCommentExpansion(
         result.id,
         !comment.classList.contains("expanded"),
       );
+    });
+    comment.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.openCommentEditor(
+        this.getCurrentResult(result.id) ?? result,
+      ).catch((error) => Zotero.logError(toError(error)));
     });
     return comment;
   }
@@ -1823,60 +2237,98 @@ export class FigureSidebarPanel {
   private openMenu(
     anchor: HTMLButtonElement,
     result: StoredFigureResult,
+    event?: MouseEvent,
   ): void {
+    if (this.batchBusy) return;
     this.closeMenu();
+    const sourceCard = anchor.closest<HTMLElement>(
+      ".zoterofigure-sidebar-card:not(.zoterofigure-pinned-card)",
+    );
+    if (sourceCard && !this.selectedResultIDs.has(result.id))
+      this.selectResult(result.id, {
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+      });
     const menu = this.options.ownerWindow.document.createXULElement(
       "menupopup",
     ) as MenuPopup;
     menu.id = `${PANEL_ID}-menu`;
-    this.appendMenuItem(menu, "sidebar-copy-image", () =>
-      this.options.onCopyImage(result),
-    );
-    if (result.kind === "formula") {
-      this.appendMenuItem(menu, "sidebar-copy-latex", () =>
-        this.copyFormulaLatex(anchor, result),
+    if (sourceCard) {
+      this.appendMenuItem(menu, "gallery-export-selected", () =>
+        this.runSelectedBatch("export"),
       );
-      if (result.latex) {
-        this.appendMenuItem(menu, "sidebar-rerecognize-latex", () =>
-          this.rerecognizeFormulaLatex(anchor, result),
+      this.appendMenuItem(menu, "gallery-delete-selected", () =>
+        this.runSelectedBatch("delete"),
+      );
+      this.appendMenuItem(menu, "gallery-select-all", () =>
+        this.selectAllResults(),
+      );
+      this.appendMenuItem(menu, "gallery-clear-selection", () => {
+        this.selectedResultIDs.clear();
+        this.selectionAnchorID = undefined;
+        this.updateSelection();
+      });
+      if (this.selectedResultIDs.size > 1)
+        this.appendMenuItem(menu, "sidebar-pin-image", () =>
+          this.pinSelectedCards(result, sourceCard),
         );
-        this.appendMenuItem(menu, "sidebar-edit-latex", () =>
-          this.openLatexEditor(result),
+      menu.append(
+        this.options.ownerWindow.document.createXULElement("menuseparator"),
+      );
+    }
+    if (!sourceCard || this.selectedResultIDs.size === 1) {
+      this.appendMenuItem(menu, "sidebar-copy-image", () =>
+        this.options.onCopyImage(result),
+      );
+      if (result.kind === "formula") {
+        this.appendMenuItem(menu, "sidebar-copy-latex", () =>
+          this.copyFormulaLatex(anchor, result),
+        );
+        if (result.latex) {
+          this.appendMenuItem(menu, "sidebar-rerecognize-latex", () =>
+            this.rerecognizeFormulaLatex(anchor, result),
+          );
+          this.appendMenuItem(menu, "sidebar-edit-latex", () =>
+            this.openLatexEditor(result),
+          );
+        }
+      }
+      this.appendMenuItem(menu, "sidebar-save-image", () =>
+        this.options.onSaveImage(result),
+      );
+      if (sourceCard) {
+        this.appendMenuItem(menu, "sidebar-pin-image", () => {
+          return this.pinSelectedCards(result, sourceCard);
+        });
+      }
+      this.appendMenuItem(menu, "sidebar-go-to-page", () =>
+        this.options.onGoToPage(result),
+      );
+      this.appendMenuItem(menu, "sidebar-edit-comment", () =>
+        this.openCommentEditor(result),
+      );
+      this.appendMenuItem(menu, "sidebar-correct-region", () =>
+        this.openRegionEditor(result),
+      );
+      if (!this.options.isAnalyzing()) {
+        this.appendMenuItem(menu, "sidebar-recognize-region", () =>
+          this.options.onRecognizeRegion(result),
         );
       }
+      menu.append(
+        this.options.ownerWindow.document.createXULElement("menuseparator"),
+      );
+      this.appendMenuItem(menu, "sidebar-add-to-note", () =>
+        this.addResultToNote(result),
+      );
+      if (!sourceCard)
+        this.appendMenuItem(menu, "sidebar-remove", () =>
+          this.options.onRemove(result),
+        );
     }
-    this.appendMenuItem(menu, "sidebar-save-image", () =>
-      this.options.onSaveImage(result),
-    );
-    const sourceCard = anchor.closest<HTMLElement>(
-      ".zoterofigure-sidebar-card:not(.zoterofigure-pinned-card)",
-    );
-    if (sourceCard) {
-      this.appendMenuItem(menu, "sidebar-pin-image", () => {
-        this.cancelImageNavigation();
-        return this.pinCard(result, sourceCard);
-      });
-    }
-    this.appendMenuItem(menu, "sidebar-go-to-page", () =>
-      this.options.onGoToPage(result),
-    );
-    this.appendMenuItem(menu, "sidebar-edit-comment", () =>
-      this.openCommentEditor(result),
-    );
-    this.appendMenuItem(menu, "sidebar-correct-region", () =>
-      this.openRegionEditor(result),
-    );
-    menu.append(
-      this.options.ownerWindow.document.createXULElement("menuseparator"),
-    );
-    this.appendMenuItem(menu, "sidebar-add-to-note", () =>
-      this.addResultToNote(result),
-    );
-    this.appendMenuItem(menu, "sidebar-remove", () =>
-      this.options.onRemove(result),
-    );
     const container =
-      this.options.ownerWindow.document.querySelector("#browser") ??
+      (this.options.reader as PdfReader & { _popupset?: Element })._popupset ??
       this.options.ownerWindow.document.documentElement;
     container.append(menu);
     this.menu = menu;
@@ -1891,7 +2343,14 @@ export class FigureSidebarPanel {
       },
       { once: true },
     );
-    menu.openPopup(anchor, "after_start", 0, 0, false, false);
+    if (event) {
+      const { screenX, screenY } = event;
+      // Match the native Reader menu: open after the right-button event finishes.
+      this.options.ownerWindow.setTimeout(() => {
+        if (this.disposed || this.menu !== menu) return;
+        menu.openPopupAtScreen(screenX, screenY, true);
+      }, 0);
+    } else menu.openPopup(anchor, "after_start", 0, 0, false, false);
   }
 
   private closeMenu(): void {
@@ -1989,6 +2448,21 @@ export class FigureSidebarPanel {
     }
     const pinnedCard = this.pinnedCards.get(updated.id);
     if (pinnedCard) this.requestPinnedCardRefresh(pinnedCard, updated);
+    if (previous?.comment !== updated.comment) {
+      const list = this.panel?.querySelector(".zoterofigure-sidebar-list");
+      const cards = new Map(this.resultCards);
+      this.resultCards.clear();
+      for (const result of filterAndSortFigureSidebarItems(
+        this.results,
+        this.filters,
+        (result) => result,
+      )) {
+        const card = cards.get(result.id);
+        if (!card) continue;
+        this.resultCards.set(result.id, card);
+        list?.append(card);
+      }
+    }
     this.refreshControls();
   }
 
@@ -2121,7 +2595,7 @@ export class FigureSidebarPanel {
       this.pinnedCards.get(resultID)?.element,
     ]) {
       const button = card?.querySelector<HTMLButtonElement>(
-        ".zoterofigure-card-menu",
+        ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
       );
       if (button) this.setMenuButtonState(button, "menu");
     }
@@ -2146,16 +2620,20 @@ export class FigureSidebarPanel {
       sourceCard?.isConnected === false
         ? undefined
         : sourceCard?.querySelector<HTMLButtonElement>(
-            ".zoterofigure-card-menu",
+            ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
           );
     const button =
       sourceButton ??
       this.resultCards
         .get(resultID)
-        ?.querySelector<HTMLButtonElement>(".zoterofigure-card-menu") ??
+        ?.querySelector<HTMLButtonElement>(
+          ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+        ) ??
       this.pinnedCards
         .get(resultID)
-        ?.element.querySelector<HTMLButtonElement>(".zoterofigure-card-menu") ??
+        ?.element.querySelector<HTMLButtonElement>(
+          ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+        ) ??
       anchor;
     this.setMenuButtonState(button, state, action);
   }

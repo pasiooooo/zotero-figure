@@ -135,15 +135,22 @@ test("restores the empty state after analysis for an empty active filter", () =>
   assert.equal(shouldShowFigureSidebarEmptyState(1, false), false);
 });
 
-test("sorts by page and visual position before using the tag", () => {
+test("groups kinds and sorts complete numbers before page and visual position", () => {
   const entries: Entry[] = [
-    { id: "second", kind: "figure", pageIndex: 1, tag: "Figure 2" },
+    {
+      id: "second",
+      kind: "figure",
+      pageIndex: 1,
+      tag: "Figure 2",
+      comment: "Fig 2",
+    },
     {
       id: "lower",
       kind: "figure",
       pageIndex: 0,
       rect: [40, 100, 240, 220],
       tag: "Figure 1-6",
+      comment: "Fig 1-6",
     },
     {
       id: "upper-right",
@@ -151,6 +158,7 @@ test("sorts by page and visual position before using the tag", () => {
       pageIndex: 0,
       rect: [280, 400, 500, 520],
       tag: "Table 8",
+      comment: "Table 8",
     },
     {
       id: "upper-left",
@@ -158,6 +166,7 @@ test("sorts by page and visual position before using the tag", () => {
       pageIndex: 0,
       rect: [30, 400, 250, 520],
       tag: "Figure 1-5",
+      comment: "Fig 1-5",
     },
   ];
 
@@ -165,7 +174,94 @@ test("sorts by page and visual position before using the tag", () => {
 
   assert.deepEqual(
     sorted.map(({ id }) => id),
-    ["upper-left", "upper-right", "lower", "second"],
+    ["upper-left", "lower", "second", "upper-right"],
+  );
+});
+
+test("sorts composite caption numbers naturally for every kind, including legacy truncated tags", () => {
+  for (const [kind, prefix] of [
+    ["figure", "Fig."],
+    ["table", "Table"],
+    ["formula", "Eq."],
+  ] as const) {
+    for (const separator of [".", "-"]) {
+      const numbers = ["2.1", "1.10", "1.2", "1.1", "10", "2", "1"];
+      const entries: Entry[] = numbers.map((number, index) => ({
+        id: number,
+        kind,
+        pageIndex: index,
+        tag: `${prefix} ${number.split(".")[0]}`,
+        comment: `${prefix} ${number.replace(".", separator)}. Caption`,
+      }));
+      assert.deepEqual(
+        filterAndSortFigureSidebarItems(entries, new Set(), metadata).map(
+          ({ id }) => id,
+        ),
+        ["1", "1.1", "1.2", "1.10", "2", "2.1", "10"],
+      );
+    }
+  }
+});
+
+test("puts missing and unnumbered captions before every numbered kind, even with numbered tags", () => {
+  const entries: Entry[] = [
+    {
+      id: "none",
+      kind: "figure",
+      pageIndex: 0,
+      tag: "Figure",
+      comment: "Results from 2024",
+    },
+    {
+      id: "later",
+      kind: "figure",
+      pageIndex: 2,
+      tag: "Figure 2",
+      comment: "Measured at 1 GHz",
+    },
+    {
+      id: "earlier",
+      kind: "figure",
+      pageIndex: 1,
+      tag: "Figure 2",
+      comment: "Fig 2",
+    },
+    {
+      id: "first",
+      kind: "figure",
+      pageIndex: 3,
+      tag: "Figure 1",
+      comment: "Fig 1",
+    },
+    {
+      id: "empty-table",
+      kind: "table",
+      pageIndex: 1,
+      tag: "Table 1",
+      comment: "",
+    },
+    { id: "missing-formula", kind: "formula", pageIndex: 1, tag: "Formula 1" },
+    {
+      id: "blank-figure",
+      kind: "figure",
+      pageIndex: 4,
+      tag: "Figure 3",
+      comment: " \n ",
+    },
+  ];
+  assert.deepEqual(
+    filterAndSortFigureSidebarItems(entries, new Set(), metadata).map(
+      ({ id }) => id,
+    ),
+    [
+      "none",
+      "later",
+      "blank-figure",
+      "empty-table",
+      "missing-formula",
+      "first",
+      "earlier",
+    ],
   );
 });
 

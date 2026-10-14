@@ -24,7 +24,7 @@ Zotero Figure находит в PDF рисунки, таблицы, отдель
 ## Требования
 
 - Zotero 9 или Zotero 10.
-- XPI Zotero Figure из [последнего выпуска](https://github.com/MuiseDestiny/zotero-figure/releases/latest).
+- XPI Zotero Figure из [последнего выпуска](https://github.com/pasiooooo/zotero-figure/releases/latest).
 - Только для OCR формул: сеть и ключ API SiliconFlow.
 
 Java и `pdffigures2.jar` не требуются.
@@ -50,6 +50,6 @@ OCR формул необязателен. Проверка ключа API от�
 
 ## Ссылки
 
-- [Выпуски](https://github.com/MuiseDestiny/zotero-figure/releases)
-- [Сообщить о проблеме](https://github.com/MuiseDestiny/zotero-figure/issues)
+- [Выпуски](https://github.com/pasiooooo/zotero-figure/releases)
+- [Сообщить о проблеме](https://github.com/pasiooooo/zotero-figure/issues)
 - [Лицензия AGPL-3.0-or-later](../LICENSE)

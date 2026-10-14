@@ -1,8 +1,10 @@
 import { config } from "../../../package.json";
 import type { DuplicateMode } from "../../domain/figureResults";
+import { containsResultRegion } from "../../domain/resultRegion";
 import {
   buildAnnotationCandidates,
   pageMayContainFigures,
+  type AnnotationCandidate,
   type PageLayoutData,
   type Rect,
 } from "../../domain/layout";
@@ -57,6 +59,7 @@ export interface AnalysisProgress {
 
 export interface AnalysisOptions {
   annotationReader?: PdfReader;
+  duplicateMode?: DuplicateMode;
   signal?: AbortSignal;
   syncAnnotations?: boolean;
 }
@@ -118,6 +121,107 @@ export class LayoutAnalyzer {
     await this.getWorkerPool(validation.path, validation.variant).prepare(
       this.lifecycleController.signal,
     );
+  }
+
+  public async analyzeRegion(
+    attachment: Zotero.Item,
+    pageIndex: number,
+    rect: Rect,
+    options: AnalysisOptions = {},
+  ): Promise<PageAnalysisOutcome> {
+    if (this.disposed) throw new OperationCancelledError();
+    if (
+      !Number.isInteger(pageIndex) ||
+      pageIndex < 0 ||
+      rect.length !== 4 ||
+      !rect.every(Number.isFinite) ||
+      rect[2] <= rect[0] ||
+      rect[3] <= rect[1]
+    ) {
+      throw new Error("Invalid recognition region");
+    }
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    const signals = [options.signal, this.lifecycleController.signal];
+    for (const signal of signals) {
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+    }
+    const signal = controller.signal;
+    let releaseAnalysis: (() => void) | undefined;
+    let releaseDocument: (() => void) | undefined;
+    let document: PdfAnalysisDocument | undefined;
+    try {
+      releaseAnalysis = await attachmentAnalysisLeases.acquire(
+        getAttachmentAnalysisKey(attachment),
+        signal,
+      );
+      const [validation] = await Promise.all([
+        modelManager.ensureRecommendedModel({ signal }),
+        this.pdfEngine.prepare(signal),
+      ]);
+      throwIfAborted(signal);
+      if (validation.state !== "valid") {
+        throw new Error(
+          getString(
+            validation.state === "missing"
+              ? "error-model-file-unavailable"
+              : "error-model-integrity",
+          ),
+        );
+      }
+      const workerPool = this.getWorkerPool(
+        validation.path,
+        validation.variant,
+      );
+      await workerPool.prepare(signal);
+      const source = await this.resultStore.getSourceFingerprint(
+        attachment,
+        signal,
+      );
+      releaseDocument = await this.openPdfDocuments.acquire(signal);
+      document = await this.pdfEngine.open(attachment, signal);
+      if (pageIndex >= document.pageCount)
+        throw new Error("Invalid recognition page");
+      const page = await document.getPageData(pageIndex, signal);
+      const region: Rect = [
+        Math.max(rect[0], page.viewBox[0]),
+        Math.max(rect[1], page.viewBox[1]),
+        Math.min(rect[2], page.viewBox[2]),
+        Math.min(rect[3], page.viewBox[3]),
+      ];
+      if (region[2] <= region[0] || region[3] <= region[1]) {
+        throw new Error("Recognition region is outside the PDF page");
+      }
+      return await this.processPage(
+        attachment,
+        document,
+        workerPool,
+        {
+          ...page,
+          fullPageBounds: page.pageBounds,
+          pageBounds: transformRect(region, page.pdfToPage),
+          pageIndex,
+          width: page.viewBox[2] - page.viewBox[0],
+          height: page.viewBox[3] - page.viewBox[1],
+        },
+        source,
+        "replace-page",
+        options.syncAnnotations === true,
+        options.annotationReader ?? attachment,
+        signal,
+        region,
+      );
+    } finally {
+      try {
+        await document?.close();
+      } finally {
+        releaseDocument?.();
+        releaseAnalysis?.();
+        for (const signal of signals)
+          signal?.removeEventListener("abort", abort);
+      }
+    }
   }
 
   public dispose(): void {
@@ -310,7 +414,7 @@ export class LayoutAnalyzer {
       throw new Error(getString("error-model-integrity"));
     }
 
-    const duplicateMode = getDuplicateMode();
+    const duplicateMode = options.duplicateMode ?? getDuplicateMode();
     const workerPool = this.getWorkerPool(validation.path, validation.variant);
     const [fingerprintResult, workerResult] = await Promise.all([
       measureAsync(() =>
@@ -465,6 +569,10 @@ export class LayoutAnalyzer {
           );
           telemetry.mergeFinalization(finalized);
         }
+        await this.resultStore.ensureAnalysisRecord(
+          attachment,
+          operationSignal,
+        );
         completed = true;
         return summary;
       } catch (error) {
@@ -499,12 +607,15 @@ export class LayoutAnalyzer {
     pdfDocument: PdfAnalysisDocument,
     workerPool: LayoutWorkerPool,
     page: Omit<PageLayoutData, "elements"> &
-      Pick<PdfAnalysisPageData, "pageBounds" | "pageToPdf">,
+      Pick<PdfAnalysisPageData, "pageBounds" | "pageToPdf"> & {
+        fullPageBounds?: Rect;
+      },
     sourceFingerprint: string,
     duplicateMode: DuplicateMode,
     syncAnnotations: boolean,
     annotationTarget?: AnnotationTarget,
     signal?: AbortSignal,
+    region?: Rect,
   ): Promise<PageAnalysisOutcome> {
     const telemetry = new PageAnalysisTelemetry();
     const timings = telemetry.timings;
@@ -512,18 +623,19 @@ export class LayoutAnalyzer {
       const detectionWaitStartedAt = Date.now();
       const releaseDetection = await this.detectionPages.acquire(signal);
       timings.detectionStageWaitMs = Date.now() - detectionWaitStartedAt;
-      let elements: PageLayoutData["elements"];
+      let candidates: AnnotationCandidate[];
       try {
         const renderWaitStartedAt = Date.now();
         const releaseRender = await this.pdfRenders.acquire(signal);
         timings.detectionRenderWaitMs = Date.now() - renderWaitStartedAt;
         let image: ArrayBuffer;
         try {
-          const rendered = await pdfDocument.renderDetectionImage(
-            page.pageIndex,
-            signal,
-          );
-          image = rendered.image;
+          const rendered = region
+            ? await pdfDocument.renderRegions(page.pageIndex, [region], signal)
+            : await pdfDocument.renderDetectionImage(page.pageIndex, signal);
+          image = "image" in rendered ? rendered.image : rendered.images[0];
+          if (!image?.byteLength)
+            throw new Error("Recognition image was not rendered");
           timings.renderingMs = rendered.renderMs + rendered.encodeMs;
         } finally {
           releaseRender();
@@ -535,7 +647,7 @@ export class LayoutAnalyzer {
           page.pageIndex,
           signal,
         );
-        elements = mapLayoutElementsToPdf(detection.elements, page);
+        const elements = mapLayoutElementsToPdf(detection.elements, page);
         timings.workerDecodeMs = detection.timings.decodeMs;
         timings.workerQueueMs = detection.timings.queueMs;
         timings.preprocessMs = detection.timings.preprocessMs;
@@ -543,19 +655,97 @@ export class LayoutAnalyzer {
         timings.postprocessMs = detection.timings.postprocessMs;
         timings.workerTotalMs = detection.timings.totalMs;
         timings.detectionMs = Date.now() - detectionStartedAt;
+        candidates = buildAnnotationCandidates(
+          { ...page, elements },
+          Boolean(region),
+        ).filter(({ rect }) => !region || containsResultRegion(region, rect));
+        if (region && page.fullPageBounds && page.chars.length > 0) {
+          const captioned = buildAnnotationCandidates({ ...page, elements });
+          const needsCaption = (candidate: AnnotationCandidate) =>
+            !candidate.tag.startsWith("Formula") &&
+            (!candidate.comment.trim() ||
+              !captioned.some((other) =>
+                other.rect.every(
+                  (value, index) => value === candidate.rect[index],
+                ),
+              ));
+          if (candidates.some(needsCaption)) {
+            // A tight crop can hide the caption or remove the context the layout model needs.
+            const waitStartedAt = Date.now();
+            const releaseContextRender = await this.pdfRenders.acquire(signal);
+            timings.detectionRenderWaitMs += Date.now() - waitStartedAt;
+            try {
+              const rendered = await pdfDocument.renderDetectionImage(
+                page.pageIndex,
+                signal,
+              );
+              image = rendered.image;
+              timings.renderingMs += rendered.renderMs + rendered.encodeMs;
+            } finally {
+              releaseContextRender();
+            }
+            const contextStartedAt = Date.now();
+            const context = await workerPool.detectWithTiming(
+              image,
+              page.pageIndex,
+              signal,
+            );
+            timings.detectionMs += Date.now() - contextStartedAt;
+            timings.workerDecodeMs += context.timings.decodeMs;
+            timings.workerQueueMs += context.timings.queueMs;
+            timings.preprocessMs += context.timings.preprocessMs;
+            timings.inferenceMs += context.timings.inferenceMs;
+            timings.postprocessMs += context.timings.postprocessMs;
+            timings.workerTotalMs += context.timings.totalMs;
+            const isCaption = ({ type }: PageLayoutData["elements"][number]) =>
+              type === "figure_caption" || type === "table_caption";
+            const contextElements = mapLayoutElementsToPdf(context.elements, {
+              ...page,
+              pageBounds: page.fullPageBounds,
+            }).filter(isCaption);
+            const recovered = buildAnnotationCandidates(
+              {
+                ...page,
+                elements: [
+                  ...elements.filter((element) => !isCaption(element)),
+                  ...contextElements,
+                ],
+              },
+              true,
+            );
+            candidates = candidates.map((candidate) => {
+              if (!needsCaption(candidate)) return candidate;
+              const match = recovered.find(
+                (other) =>
+                  other.comment.trim() &&
+                  other.rect.every(
+                    (value, index) => value === candidate.rect[index],
+                  ),
+              );
+              return match ?? candidate;
+            });
+          }
+        }
       } finally {
         releaseDetection();
       }
       throwIfAborted(signal);
-      const candidates = buildAnnotationCandidates({ ...page, elements });
+      if (region && candidates.length === 0) {
+        return telemetry.succeed(
+          { created: 0, removed: 0, skipped: 0 },
+          { created: 0, removed: 0, skipped: 0 },
+        );
+      }
       const cacheLookupStartedAt = Date.now();
-      const reusableResults = await this.resultStore.getReusablePageResults(
-        attachment,
-        page.pageIndex,
-        candidates,
-        signal,
-        sourceFingerprint,
-      );
+      const reusableResults = region
+        ? undefined
+        : await this.resultStore.getReusablePageResults(
+            attachment,
+            page.pageIndex,
+            candidates,
+            signal,
+            sourceFingerprint,
+          );
       timings.cacheLookupMs = Date.now() - cacheLookupStartedAt;
       let resultImages: ArrayBuffer[] = [];
       let renderCandidates: FigureResultRenderCandidate[] = [];
@@ -614,15 +804,25 @@ export class LayoutAnalyzer {
                 manifestWriteMs: 0,
               },
             }
-          : await this.resultStore.reconcilePlannedPage(
-              attachment,
-              page.pageIndex,
-              renderCandidates,
-              resultImages,
-              duplicateMode,
-              signal,
-              sourceFingerprint,
-            );
+          : region
+            ? await this.resultStore.reconcileRegion(
+                attachment,
+                page.pageIndex,
+                region,
+                renderCandidates,
+                resultImages,
+                signal,
+                sourceFingerprint,
+              )
+            : await this.resultStore.reconcilePlannedPage(
+                attachment,
+                page.pageIndex,
+                renderCandidates,
+                resultImages,
+                duplicateMode,
+                signal,
+                sourceFingerprint,
+              );
         timings.storageMs = Date.now() - storageStartedAt;
       } finally {
         releaseStorage();
@@ -651,6 +851,7 @@ export class LayoutAnalyzer {
             annotationCandidates,
             duplicateMode,
             signal,
+            region,
           );
           annotationsCreated = reconciled.created;
           annotationsRemoved = reconciled.removed;
@@ -679,6 +880,7 @@ export class LayoutAnalyzer {
       );
     } catch (error) {
       if (isCancellationError(error)) throw error;
+      if (region) throw error;
       if (workerPool.isDisposed) throw error;
       ztoolkit.log(
         `Layout analysis failed on page ${page.pageIndex + 1}`,

@@ -24,7 +24,7 @@ Zotero Figure detecta figuras, tablas, fórmulas aisladas, leyendas y notas al p
 ## Requisitos
 
 - Zotero 9 o Zotero 10.
-- El XPI de Zotero Figure de la [última versión](https://github.com/MuiseDestiny/zotero-figure/releases/latest).
+- El XPI de Zotero Figure de la [última versión](https://github.com/pasiooooo/zotero-figure/releases/latest).
 - Solo para OCR de fórmulas: conexión de red y una clave API de SiliconFlow.
 
 No se necesitan Java ni `pdffigures2.jar`.
@@ -50,6 +50,6 @@ El OCR de fórmulas es opcional. La comprobación de la clave API envía a Silic
 
 ## Enlaces
 
-- [Versiones](https://github.com/MuiseDestiny/zotero-figure/releases)
-- [Incidencias](https://github.com/MuiseDestiny/zotero-figure/issues)
+- [Versiones](https://github.com/pasiooooo/zotero-figure/releases)
+- [Incidencias](https://github.com/pasiooooo/zotero-figure/issues)
 - [Licencia AGPL-3.0-or-later](../LICENSE)

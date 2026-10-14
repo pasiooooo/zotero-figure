@@ -48,6 +48,14 @@ async function onStartup(): Promise<void> {
     loadLibrary: (libraryID: number) => galleryIndex.loadLibrary(libraryID),
     openSource: (entryID: string) => galleryIndex.openSource(entryID),
     readImage: (entryID: string) => galleryIndex.readImage(entryID),
+    runBatch: async (entryIDs: string[], action: "delete" | "export") => {
+      const outcome = await galleryIndex.runBatch(entryIDs, action);
+      if (action === "delete" && outcome?.completedIDs.length) {
+        for (const controller of controllers.values())
+          controller.reloadResults();
+      }
+      return outcome;
+    },
     setComparisonLayout: setFigureGalleryComparisonLayout,
     setImageScale: setFigureGalleryImageScale,
     setViewMode: setFigureGalleryViewMode,
@@ -67,17 +75,20 @@ async function onStartup(): Promise<void> {
 
 async function onMainWindowLoad(win: Window): Promise<void> {
   if (controllers.has(win)) return;
-  const { formulaLatex, layoutAnalyzer, resultStore } = ensureServices();
+  const { formulaLatex, layoutAnalyzer, resultStore, galleryIndex } =
+    ensureServices();
+  const galleryController = new FigureGalleryController(win);
+  galleryControllers.set(win, galleryController);
+  galleryController.start();
   const controller = new FigureReaderController(win, {
     formulaLatex,
     layoutAnalyzer,
     resultStore,
+    galleryIndex,
+    openGallery: (attachment) => galleryController.openAttachment(attachment),
   });
   controllers.set(win, controller);
   controller.start();
-  const galleryController = new FigureGalleryController(win);
-  galleryControllers.set(win, galleryController);
-  galleryController.start();
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {

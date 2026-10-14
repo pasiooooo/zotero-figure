@@ -255,6 +255,44 @@ test("rolls back an annotation when its tag save fails", async () => {
   }
 });
 
+test("region reconciliation leaves outside and crossing annotations untouched", async () => {
+  const old = makeExistingAnnotation(makeCandidate("Figure", "old"));
+  const outside = makeExistingAnnotation(
+    makeCandidate("Figure", "outside", 50),
+  );
+  const crossing = makeExistingAnnotation(
+    makeCandidate("Figure", "crossing", 15),
+  );
+  const reader = makeReader([old.item, outside.item, crossing.item]);
+  const harness = installZoteroHarness();
+  try {
+    const empty = await reconcileGeneratedAnnotations(
+      reader,
+      0,
+      [],
+      "replace-page",
+      undefined,
+      [0, 0, 20, 20],
+    );
+    assert.equal(empty.removed, 0);
+    assert.equal(old.erased, false);
+    const result = await reconcileGeneratedAnnotations(
+      reader,
+      0,
+      [makeCandidate("Figure", "new"), makeCandidate("Figure", "outside", 50)],
+      "replace-page",
+      undefined,
+      [0, 0, 20, 20],
+    );
+    assert.deepEqual(result, { created: 1, removed: 1, skipped: 0 });
+    assert.equal(old.erased, true);
+    assert.equal(outside.erased, false);
+    assert.equal(crossing.erased, false);
+  } finally {
+    harness.restore();
+  }
+});
+
 function makeCandidate(
   tag: string,
   comment: string,

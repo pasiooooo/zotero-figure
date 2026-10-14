@@ -1,3 +1,5 @@
+import { extractFigureNumber } from "./figureNumber";
+
 export type LayoutElementType =
   | "figure"
   | "figure_caption"
@@ -92,10 +94,11 @@ export function pageMayContainFigures(chars: readonly PdfCharacter[]): boolean {
 
 export function buildAnnotationCandidates(
   page: PageLayoutData,
+  includeUncaptioned = false,
 ): AnnotationCandidate[] {
   const candidates: AnnotationCandidate[] = [];
   for (const subjectType of ["figure", "table"] as const) {
-    candidates.push(...matchSubjectType(page, subjectType));
+    candidates.push(...matchSubjectType(page, subjectType, includeUncaptioned));
   }
   candidates.push(...matchFormulae(page));
   return candidates;
@@ -104,6 +107,7 @@ export function buildAnnotationCandidates(
 function matchSubjectType(
   page: PageLayoutData,
   subjectType: "figure" | "table",
+  includeUncaptioned: boolean,
 ): AnnotationCandidate[] {
   const captions = collectCaptions(page, `${subjectType}_caption`);
   const footnotes =
@@ -123,12 +127,13 @@ function matchSubjectType(
       subjectType,
       page.height,
     );
-    if (captionIndex === undefined) continue;
+    if (captionIndex === undefined && !includeUncaptioned) continue;
 
-    const caption = captions[captionIndex];
+    const caption =
+      captionIndex === undefined ? undefined : captions[captionIndex];
     const [xMin, yMin] = page.viewBox;
     let crop = subject;
-    let comment = caption.text;
+    let comment = caption?.text ?? "";
     if (subjectType === "table") {
       const footnoteIndex = findClosestRegionBelow(
         subject,
@@ -150,14 +155,14 @@ function matchSubjectType(
       roundCoordinate(crop[3] + yMin),
     ];
 
-    if (!comment && rect[2] - rect[0] < 30) continue;
+    if (!includeUncaptioned && !comment && rect[2] - rect[0] < 30) continue;
 
-    usedCaptions.add(captionIndex);
+    if (captionIndex !== undefined) usedCaptions.add(captionIndex);
     candidates.push({
       comment,
       pageIndex: page.pageIndex,
       rect,
-      tag: `${capitalize(subjectType)} ${caption.number}`.trim(),
+      tag: `${capitalize(subjectType)} ${caption?.number ?? ""}`.trim(),
     });
   }
 
@@ -222,13 +227,18 @@ function collectTextRegions(
         page.height,
       );
       const chars = page.chars.filter((char) =>
-        isCharacterCenteredInRect(char, [left, bottom, right, top]),
+        isCharacterCenteredInRect(char, [
+          left + page.viewBox[0],
+          bottom + page.viewBox[1],
+          right + page.viewBox[0],
+          top + page.viewBox[1],
+        ]),
       );
       const text = charsToText(chars);
       return {
         bottom,
         left,
-        number: text.match(/\d+/)?.[0] ?? "",
+        number: extractFigureNumber(text),
         right,
         text,
         top,

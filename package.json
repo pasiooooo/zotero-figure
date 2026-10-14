@@ -1,6 +1,6 @@
 {
   "name": "zotero-figure",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "Local figure and table extraction for Zotero PDFs",
   "config": {
     "addonName": "PDF Figure",
@@ -8,8 +8,8 @@
     "addonRef": "zoterofigure",
     "addonInstance": "ZoteroFigure",
     "prefsPrefix": "extensions.zotero.zoterofigure",
-    "updateLink": "https://github.com/MuiseDestiny/zotero-figure/releases/latest/download/zotero-figure.xpi",
-    "updateURL": "https://raw.githubusercontent.com/MuiseDestiny/zotero-figure/bootstrap/update.json"
+    "updateLink": "https://github.com/pasiooooo/zotero-figure/releases/latest/download/zotero-figure.xpi",
+    "updateURL": "https://github.com/pasiooooo/zotero-figure/releases/latest/download/update.json"
   },
   "main": "src/index.ts",
   "scripts": {
@@ -28,20 +28,22 @@
     "lint:fix": "eslint src tests typing --ext .ts --fix",
     "typecheck": "tsc --noEmit --pretty false",
     "test": "node scripts/run-tests.mjs",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run check:scripts && npm run build:check",
-    "release": "release-it --only-version --preReleaseId=beta",
+    "test:release": "node --test scripts/prepare-release.test.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:release && npm run check:scripts && npm run build:check",
+    "release": "release-it",
+    "release:prepare": "node scripts/prepare-release.mjs",
     "update-deps": "npm update --save"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MuiseDestiny/zotero-figure.git"
+    "url": "git+https://github.com/pasiooooo/zotero-figure.git"
   },
   "author": "Polygon",
   "license": "AGPL-3.0-or-later",
   "bugs": {
-    "url": "https://github.com/MuiseDestiny/zotero-figure/issues"
+    "url": "https://github.com/pasiooooo/zotero-figure/issues"
   },
-  "homepage": "https://github.com/MuiseDestiny/zotero-figure#readme",
+  "homepage": "https://github.com/pasiooooo/zotero-figure#readme",
   "engines": {
     "node": ">=20.10"
   },

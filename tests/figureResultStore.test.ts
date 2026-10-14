@@ -49,6 +49,40 @@ test("figure result fingerprints and IDs are stable after normalization", () => 
   );
 });
 
+test("analysis records include empty results and are reset by clearing", async () => {
+  const harness = installStoreHarness();
+  const store = new FigureResultStore();
+  try {
+    assert.equal(await store.hasAnalysis(harness.item), false);
+    await store.ensureAnalysisRecord(harness.item);
+    assert.equal(await store.hasAnalysis(harness.item), true);
+    assert.deepEqual(await store.list(harness.item), []);
+    const saved = harness.io.readText(getManifestPath());
+    await store.ensureAnalysisRecord(harness.item);
+    assert.equal(harness.io.readText(getManifestPath()), saved);
+    await store.clear(harness.item);
+    assert.equal(await store.hasAnalysis(harness.item), false);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("cancelled analysis does not create an empty analysis record", async () => {
+  const harness = installStoreHarness();
+  const store = new FigureResultStore();
+  const controller = new AbortController();
+  controller.abort();
+  try {
+    await assert.rejects(
+      store.ensureAnalysisRecord(harness.item, controller.signal),
+      OperationCancelledError,
+    );
+    assert.equal(await store.hasAnalysis(harness.item), false);
+  } finally {
+    harness.restore();
+  }
+});
+
 test("replace-page replaces only that page and removes obsolete images", async () => {
   const harness = installStoreHarness();
   const store = new FigureResultStore();
@@ -80,6 +114,7 @@ test("replace-page replaces only that page and removes obsolete images", async (
       "replace-page",
     );
     const obsoletePath = first.results[0].imagePath;
+    assert.equal(await store.hasAnalysis(harness.item), true);
 
     const result = await store.reconcilePage(
       harness.item,
@@ -395,6 +430,14 @@ test("does not replace corrupt or unreadable manifests with empty data", async (
     harness.io.writeText(getManifestPath(), corruptManifest);
 
     await assert.rejects(store.list(harness.item), /contains invalid JSON/);
+    await assert.rejects(
+      store.hasAnalysis(harness.item),
+      /contains invalid JSON/,
+    );
+    await assert.rejects(
+      store.ensureAnalysisRecord(harness.item),
+      /contains invalid JSON/,
+    );
     await assert.rejects(
       store.reconcilePage(
         harness.item,
@@ -1472,6 +1515,152 @@ test("discovers only attachment result directories with manifests", async () => 
     assert.deepEqual(await store.listIndexedAttachmentKeys(5), []);
     await assert.rejects(store.listIndexedAttachmentKeys(-1), /invalid ID/);
   } finally {
+    harness.restore();
+  }
+});
+
+test("region recognition replaces only contained results and repeated runs do not duplicate", async () => {
+  const harness = installStoreHarness();
+  const store = new FigureResultStore();
+  const old = makeCandidate();
+  const outside = makeCandidate({ rect: [30, 30, 40, 40], comment: "outside" });
+  const crossing = makeCandidate({
+    rect: [15, 15, 25, 25],
+    comment: "crossing",
+  });
+  const otherPage = makeCandidate({ pageIndex: 1 });
+  const detectedCandidate = makeCandidate({
+    rect: [2, 3, 11, 13],
+    comment: "new",
+  });
+  const plan = [{ detectedCandidate, renderRect: detectedCandidate.rect }];
+  try {
+    await store.reconcilePage(
+      harness.item,
+      0,
+      [old, outside, crossing],
+      [bytes(1), bytes(2), bytes(3)],
+      "replace-page",
+    );
+    await store.reconcilePage(
+      harness.item,
+      1,
+      [otherPage],
+      [bytes(4)],
+      "replace-page",
+    );
+    const first = await store.reconcileRegion(
+      harness.item,
+      0,
+      [0, 0, 20, 20],
+      plan,
+      [bytes(5)],
+    );
+    assert.equal(first.created, 1);
+    assert.equal(first.removed, 1);
+    assert.deepEqual(
+      first.results.map(({ id }) => id).sort(),
+      [outside, crossing, otherPage, detectedCandidate]
+        .map(getFigureResultID)
+        .sort(),
+    );
+    const second = await store.reconcileRegion(
+      harness.item,
+      0,
+      [0, 0, 20, 20],
+      plan,
+      [bytes(5)],
+    );
+    assert.equal(second.created, 0);
+    assert.equal(second.skipped, 1);
+    assert.equal(second.results.length, 4);
+    const empty = await store.reconcileRegion(
+      harness.item,
+      0,
+      [0, 0, 20, 20],
+      [],
+      [],
+    );
+    assert.deepEqual(empty.results, second.results);
+    assert.equal(empty.removed, 0);
+    await assert.rejects(
+      store.reconcileRegion(harness.item, 0, [0, 0, 1, 1], plan, [bytes(5)]),
+      /outside/,
+    );
+  } finally {
+    harness.restore();
+  }
+});
+
+test("region recognition preserves a manually moved result outside the selection", async () => {
+  const harness = installStoreHarness();
+  const store = new FigureResultStore();
+  const detectedCandidate = makeCandidate();
+  try {
+    const first = await store.reconcilePage(
+      harness.item,
+      0,
+      [detectedCandidate],
+      [bytes(1)],
+      "replace-page",
+    );
+    const moved = await store.updateRegion(
+      harness.item,
+      first.results[0].id,
+      [30, 30, 40, 40],
+      bytes(2),
+    );
+    const plan = await store.getPageRenderCandidates(harness.item, 0, [
+      detectedCandidate,
+    ]);
+    const result = await store.reconcileRegion(
+      harness.item,
+      0,
+      [0, 0, 20, 20],
+      plan,
+      [bytes(3)],
+    );
+    assert.deepEqual(result.results, [moved]);
+    assert.equal(result.skipped, 1);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("region replacement rolls back when saving the manifest fails", async () => {
+  const harness = installStoreHarness();
+  const store = new FigureResultStore();
+  const old = makeCandidate();
+  const replacement = makeCandidate({ comment: "new" });
+  const originalWrite = IOUtils.writeUTF8;
+  try {
+    const before = await store.reconcilePage(
+      harness.item,
+      0,
+      [old],
+      [bytes(1)],
+      "replace-page",
+    );
+    IOUtils.writeUTF8 = async () => {
+      throw new Error("simulated manifest failure");
+    };
+    await assert.rejects(
+      store.reconcileRegion(
+        harness.item,
+        0,
+        [0, 0, 20, 20],
+        [{ detectedCandidate: replacement, renderRect: replacement.rect }],
+        [bytes(2)],
+      ),
+      /manifest failure/,
+    );
+    assert.deepEqual(await store.list(harness.item), before.results);
+    assert.deepEqual(
+      await IOUtils.read(before.results[0].imagePath),
+      new Uint8Array([1]),
+    );
+  } finally {
+    IOUtils.writeUTF8 = originalWrite;
     harness.restore();
   }
 });

@@ -4,6 +4,16 @@ export type ResultRegionEditMode = "move" | "ne" | "nw" | "se" | "sw";
 
 const MINIMUM_REGION_SIZE = 0.01;
 
+export function containsResultRegion(outer: Rect, inner: Rect): boolean {
+  // Detection coordinates are rounded to hundredths of a PDF point.
+  return (
+    inner[0] >= outer[0] - 0.01 &&
+    inner[1] >= outer[1] - 0.01 &&
+    inner[2] <= outer[2] + 0.01 &&
+    inner[3] <= outer[3] + 0.01
+  );
+}
+
 export function resizeNormalizedResultRegion(
   start: Rect,
   mode: ResultRegionEditMode,

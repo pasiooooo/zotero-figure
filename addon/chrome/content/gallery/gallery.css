@@ -974,6 +974,7 @@ main {
 }
 
 .gallery-card {
+  user-select: none;
   display: block;
   width: 100%;
   min-width: 0;
@@ -987,6 +988,21 @@ main {
   transition:
     border-color 120ms ease,
     translate 120ms ease;
+}
+
+.gallery-card.is-selected {
+  background: color-mix(
+    in srgb,
+    var(--gallery-accent) 12%,
+    var(--gallery-surface)
+  );
+  border-color: var(--gallery-accent);
+  outline: 1px solid var(--gallery-accent);
+  outline-offset: -2px;
+}
+
+.gallery-error {
+  white-space: pre-wrap;
 }
 
 .gallery-card:hover {

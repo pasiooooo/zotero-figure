@@ -1,3 +1,5 @@
+import { extractFigureNumber } from "./figureNumber";
+
 export type FigureSidebarKind = "figure" | "formula" | "table";
 
 export type FigureSidebarFilter = FigureSidebarKind;
@@ -87,13 +89,35 @@ export function filterAndSortFigureSidebarItems<T>(
   getMetadata: (item: T) => FigureSidebarItemMetadata,
 ): T[] {
   return items
-    .map((item, index) => ({ item, index, metadata: getMetadata(item) }))
+    .map((item, index) => {
+      const metadata = getMetadata(item);
+      const number = extractFigureNumber(metadata.comment ?? "");
+      return {
+        item,
+        index,
+        metadata,
+        number: number.replace(/[-‐‑–—]/g, "."),
+      };
+    })
     .filter(
       ({ metadata }) =>
         filters.size === 0 ||
         (metadata.kind !== undefined && filters.has(metadata.kind)),
     )
     .sort((first, second) => {
+      if (Boolean(first.number) !== Boolean(second.number))
+        return first.number ? 1 : -1;
+      const kinds = { figure: 0, table: 1, formula: 2 };
+      const kindDifference =
+        (first.metadata.kind ? kinds[first.metadata.kind] : 3) -
+        (second.metadata.kind ? kinds[second.metadata.kind] : 3);
+      if (kindDifference) return kindDifference;
+      const numberDifference = first.number.localeCompare(
+        second.number,
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+      if (numberDifference) return numberDifference;
       const pageDifference =
         (first.metadata.pageIndex ?? 0) - (second.metadata.pageIndex ?? 0);
       if (pageDifference !== 0) return pageDifference;

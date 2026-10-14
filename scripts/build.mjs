@@ -269,7 +269,7 @@ function prepareLocaleFiles() {
 
     const localizedMessages = new Set();
     replaceInFileSync({
-      files: [`${localePath}/*.ftl`],
+      files: [`${localePath.replaceAll("\\", "/")}/*.ftl`],
       processor: (content) =>
         content
           .split("\n")
@@ -296,9 +296,10 @@ function prepareLocaleFiles() {
 function prepareUpdateJson() {
   const outputFile = isPreRelease ? "update-beta.json" : "update.json";
   copyFileSync("scripts/update-template.json", outputFile);
-  const updateLink = isPreRelease
-    ? config.updateLink.replace("/latest/download/", `/download/v${version}/`)
-    : config.updateLink;
+  const updateLink = config.updateLink.replace(
+    "/latest/download/",
+    `/download/v${version}/`,
+  );
 
   replaceInFileSync({
     countMatches: true,

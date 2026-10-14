@@ -35,6 +35,11 @@ export interface FigureGalleryImage {
   mimeType: "image/png";
 }
 
+export interface FigureGalleryBatchResult {
+  completedIDs: string[];
+  errors: string[];
+}
+
 export interface FigureGalleryBootstrap {
   defaultLibraryID: number;
   libraries: FigureGalleryLibrary[];
