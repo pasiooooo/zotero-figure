@@ -2,6 +2,30 @@ import * as assert from "node:assert/strict";
 import test from "node:test";
 import { createZoteroFigureGalleryPlatform } from "../src/platform/zotero/figureGallery";
 
+test("loads Zotero collections recursively and retains parent IDs", () => {
+  const previous = globalThis.Zotero;
+  globalThis.Zotero = {
+    Collections: {
+      getByLibrary(libraryID: number, recursive: boolean) {
+        assert.equal(libraryID, 7);
+        assert.equal(recursive, true);
+        return [
+          { id: 1, name: "Root", parentID: false },
+          { id: 2, name: "Child", parentID: 1 },
+        ];
+      },
+    },
+  } as unknown as typeof Zotero;
+  try {
+    assert.deepEqual(createZoteroFigureGalleryPlatform().listCollections(7), [
+      { id: 1, name: "Root", parentID: null },
+      { id: 2, name: "Child", parentID: 1 },
+    ]);
+  } finally {
+    globalThis.Zotero = previous;
+  }
+});
+
 test("uses Zotero's multi-library selection API for the gallery default", () => {
   const previousZotero = globalThis.Zotero;
   let legacyCallCount = 0;

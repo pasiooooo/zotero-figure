@@ -33,7 +33,7 @@ import {
   FigureResultStore,
   type StoredFigureResult,
 } from "../../services/results/figureResultStore";
-import { isCancellationError } from "../../utils/cancellation";
+import { isCancellationError, throwIfAborted } from "../../utils/cancellation";
 import { bytesToDataURL } from "../../utils/dataURL";
 import { getString } from "../../utils/locale";
 import { getPref } from "../../utils/prefs";
@@ -216,21 +216,87 @@ export class FigureReaderController {
     this.sidebarPanels.clear();
   }
 
-  private startRegionSelection(reader: PdfReader): void {
+  private startRegionSelection(
+    reader: PdfReader,
+    captionResult?: StoredFigureResult,
+  ): void {
     if (this.activeAnalyses.has(reader)) return;
     this.regionSelections.get(reader)?.();
     try {
       const dispose = startReaderRegionSelection(
         reader,
         (region) => {
-          void this.runAnalysis(reader, [region]);
+          if (captionResult)
+            void this.correctResultCaption(reader, captionResult, region);
+          else void this.runAnalysis(reader, [region]);
         },
         () => this.regionSelections.delete(reader),
+        captionResult
+          ? {
+              title: getString("sidebar-correct-caption"),
+              hint: getString("caption-selection-hint"),
+            }
+          : undefined,
       );
       this.regionSelections.set(reader, dispose);
     } catch (error) {
       Zotero.logError(toError(error));
       this.win.alert(toError(error).message);
+    }
+  }
+
+  private async correctResultCaption(
+    reader: PdfReader,
+    result: StoredFigureResult,
+    region: Pick<AnnotationCandidate, "pageIndex" | "rect">,
+  ): Promise<void> {
+    if (this.activeAnalyses.has(reader)) return;
+    const controller = new this.win.AbortController();
+    this.activeAnalyses.set(reader, controller);
+    const panel = this.sidebarPanels.get(reader);
+    this.refreshSidebarControls(reader);
+    panel?.updateAnalysisProgress(getString("progress-correct-caption"), 0);
+    try {
+      const text = await this.layoutAnalyzer.extractRegionText(
+        reader._item,
+        region.pageIndex,
+        region.rect,
+        controller.signal,
+      );
+      throwIfAborted(controller.signal);
+      if (!text.trim()) throw new Error(getString("caption-selection-no-text"));
+      const updated = await this.editResultComment(reader, result, text);
+      if (!updated)
+        throw new Error(getString("caption-selection-result-missing"));
+      if (controller.signal.aborted) return;
+      panel?.updateResult(updated, true);
+      panel?.updateAnalysisProgress(
+        getString("progress-correct-caption-done"),
+        100,
+        "success",
+        3_000,
+      );
+    } catch (error) {
+      if (controller.signal.aborted || isCancellationError(error)) {
+        panel?.updateAnalysisProgress(
+          getString("progress-cancelled"),
+          0,
+          "cancelled",
+          1_500,
+        );
+      } else {
+        Zotero.logError(toError(error));
+        panel?.updateAnalysisProgress(
+          getString("progress-error", {
+            args: { message: toError(error).message },
+          }),
+          0,
+          "error",
+        );
+      }
+    } finally {
+      this.activeAnalyses.delete(reader);
+      this.refreshSidebarControls(reader);
     }
   }
 
@@ -250,6 +316,8 @@ export class FigureReaderController {
       latestProgress,
     );
     const startedAt = Date.now();
+    const recognizedRegions: Pick<AnnotationCandidate, "pageIndex" | "rect">[] =
+      [];
     try {
       const summary = regions
         ? {
@@ -291,6 +359,7 @@ export class FigureReaderController {
           summary.resultsSkipped += outcome.results.skipped;
           if (outcome.results.created + outcome.results.skipped === 0)
             emptyRegions++;
+          else recognizedRegions.push(region);
           latestProgress = ((index + 1) / regions.length) * 100;
           panel?.updateAnalysisProgress(
             getString("progress-detecting", {
@@ -316,6 +385,7 @@ export class FigureReaderController {
         regions ? 8_000 : 3_000,
       );
     } catch (error) {
+      recognizedRegions.length = 0;
       if (isCancellationError(error)) {
         panel?.updateAnalysisProgress(
           getString("progress-cancelled"),
@@ -338,7 +408,7 @@ export class FigureReaderController {
       this.activeAnalyses.delete(reader);
       this.formulaLatex.recognizeAttachment(reader._item);
       this.refreshSidebarControls(reader);
-      this.reloadSidebarResults(reader);
+      this.reloadSidebarResults(reader, recognizedRegions);
     }
   }
 
@@ -698,12 +768,21 @@ export class FigureReaderController {
     this.sidebarPanels.get(reader)?.refreshControls();
   }
 
-  private reloadSidebarResults(reader: PdfReader): void {
-    this.sidebarPanels.get(reader)?.reloadResults();
+  private reloadSidebarResults(
+    reader: PdfReader,
+    regionsToReveal?: readonly Pick<
+      AnnotationCandidate,
+      "pageIndex" | "rect"
+    >[],
+  ): void {
+    this.sidebarPanels.get(reader)?.reloadResults(regionsToReveal);
   }
 
-  public reloadResults(): void {
-    for (const panel of this.sidebarPanels.values()) panel.reloadResults();
+  public reloadResults(attachmentID?: number): void {
+    for (const [reader, panel] of this.sidebarPanels) {
+      if (attachmentID === undefined || reader._item.id === attachmentID)
+        panel.reloadResults();
+    }
   }
 
   private registerReader(reader: PdfReader, doc: Document): void {
@@ -720,6 +799,7 @@ export class FigureReaderController {
         onAnalyze: () => this.runAnalysis(reader),
         onOpenGallery: () => this.openGallery?.(reader._item),
         onSelectRegion: () => this.startRegionSelection(reader),
+        onCorrectCaption: (result) => this.startRegionSelection(reader, result),
         onRecognizeRegion: (result) => this.runAnalysis(reader, [result]),
         onCancelAnalysis: () => this.cancelAnalysis(reader),
         onCacheTranslations: (contextKey, updates) =>
@@ -761,7 +841,7 @@ export class FigureReaderController {
         reader._item.libraryID === update.libraryID &&
         reader._item.key === update.attachmentKey
       ) {
-        panel.updateFormulaLatex(update.result);
+        panel.updateResult(update.result);
       }
     }
   }

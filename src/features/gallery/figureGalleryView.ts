@@ -2,6 +2,7 @@ import { config } from "../../../package.json";
 import { getGalleryInitialFilter } from "./galleryInitialFilter";
 import type {
   FigureGalleryBootstrap,
+  FigureGalleryCollection,
   FigureGalleryBatchResult,
   FigureGalleryComparisonCell,
   FigureGalleryComparisonLayout,
@@ -13,6 +14,7 @@ import type {
 } from "../../domain/figureGallery";
 import {
   dissolveFigureGalleryComparisonRow,
+  filterFigureGalleryComparisonLayout,
   findShortestFigureGalleryColumn,
   getFigureGalleryColumnCount,
   getFigureGalleryImageAspectRatio,
@@ -26,19 +28,18 @@ import {
 } from "../../domain/figureGallery";
 import type { FigureResultKind } from "../../domain/figureResults";
 import { renderLatex } from "../../utils/renderLatex";
+import { buildGalleryFacetState, filterGalleryEntries } from "./galleryFilters";
 import {
-  buildGalleryFacetState,
-  filterGalleryEntries,
-  formatGalleryOptionLabel,
-  type CountedGalleryFilterOption,
-  type GalleryFacetState,
-} from "./galleryFilters";
+  GalleryFilterPanel,
+  type GalleryFilterLabels,
+} from "./galleryFilterPanel";
 import { GalleryImageLoadCoordinator } from "./galleryImageLoadCoordinator";
 import { GalleryLibraryLoadCoordinator } from "./galleryLibraryLoadCoordinator";
 import {
   FIGURE_GALLERY_IMAGE_SCALE_DEFAULT,
   FIGURE_GALLERY_IMAGE_SCALE_MAX,
   FIGURE_GALLERY_IMAGE_SCALE_MIN,
+  normalizeImageScale,
 } from "../../services/results/figureGalleryPreferences";
 
 const PAGE_SIZE = 60;
@@ -51,12 +52,10 @@ const COMPARISON_ROW_PAGE_SIZE = 20;
 const GALLERY_DRAG_DATA_TYPE = "application/x-pasiofigure-gallery";
 const GALLERY_CONTEXT_MENU_ID = `${config.addonRef}-gallery-context-menu`;
 const GALLERY_SCALE_PERSIST_DEBOUNCE_MS = 160;
-const GALLERY_SCALE_STEP = 10;
+const GALLERY_SCALE_SETTLE_MS = 140;
 const GALLERY_DRAG_SCROLL_EDGE = 64;
 const GALLERY_DRAG_SCROLL_MAX_STEP = 24;
 const GALLERY_CELL_DROP_EDGE_RATIO = 0.25;
-const COMPARISON_THUMBNAIL_MIN_SIZE = 44;
-const COMPARISON_THUMBNAIL_MAX_SIZE = 72;
 
 interface FigureGalleryApi {
   getBootstrap(): FigureGalleryBootstrap | Promise<FigureGalleryBootstrap>;
@@ -89,8 +88,6 @@ interface GalleryAddon {
 
 interface GalleryElements {
   batchStatus: HTMLSpanElement;
-  collectionFilter: HTMLSelectElement;
-  documentFilter: HTMLSelectElement;
   errorBanner: HTMLDivElement;
   filterToolbar: HTMLElement;
   galleryGrid: HTMLElement;
@@ -98,7 +95,7 @@ interface GalleryElements {
   scalePopover: HTMLDivElement;
   scaleRange: HTMLInputElement;
   scaleToggle: HTMLButtonElement;
-  scaleValue: HTMLOutputElement;
+  scaleValue: HTMLInputElement;
   keywordFilter: HTMLInputElement;
   layoutModeToggle: HTMLButtonElement;
   refresh: HTMLButtonElement;
@@ -107,8 +104,6 @@ interface GalleryElements {
   state: HTMLElement;
   stateMessage: HTMLParagraphElement;
   toolbarToggle: HTMLButtonElement;
-  typeFilter: HTMLSelectElement;
-  yearFilter: HTMLSelectElement;
 }
 
 type LocalizedArguments = Record<string, number | string>;
@@ -123,11 +118,6 @@ interface GalleryLocalization {
     messageID: string,
     args?: LocalizedArguments,
   ): void;
-}
-
-interface EntryFilterLabels {
-  allLabels: readonly [string, string, string, string];
-  kindLabels: Readonly<Record<FigureResultKind, string>>;
 }
 
 type GalleryDropPosition = "before" | "after" | "inside";
@@ -191,8 +181,12 @@ const KIND_ICON_PARTS: Readonly<Record<FigureResultKind, readonly SvgPart[]>> =
 let galleryApi: FigureGalleryApi | undefined;
 let elements: GalleryElements;
 let imageLoader: GalleryImageLoadCoordinator | undefined;
-let libraryLoader: GalleryLibraryLoadCoordinator<EntryFilterLabels> | undefined;
-let filterLabels: EntryFilterLabels | undefined;
+let libraryLoader:
+  | GalleryLibraryLoadCoordinator<GalleryFilterLabels>
+  | undefined;
+let filterPanel: GalleryFilterPanel;
+let allCollections: FigureGalleryCollection[] = [];
+let filterLabels: GalleryFilterLabels | undefined;
 let allEntries: FigureGalleryEntry[] = [];
 let filteredEntries: FigureGalleryEntry[] = [];
 let filteredEntryIDs = new Set<string>();
@@ -215,13 +209,21 @@ let comparisonRows: FigureGalleryComparisonRow[] = [];
 let comparisonDocumentIDs: number[] = [];
 let renderedComparisonRowCount = 0;
 let comparisonCardReuse: Map<string, HTMLElement> | undefined;
-let filterUpdateScheduled = false;
+let comparisonCellObserver: IntersectionObserver | undefined;
+let comparisonRenderFrame: number | undefined;
+let comparisonRowsByID = new Map<string, FigureGalleryComparisonRow>();
+let comparisonSourceRowIDs = new Map<string, string>();
+const pendingComparisonCells = new Set<HTMLElement>();
 let searchTimer: number | undefined;
 let committedLibraryID: number | undefined;
 let selectedLibraryID: number | undefined;
 let imageScale = FIGURE_GALLERY_IMAGE_SCALE_DEFAULT;
 let imageScalePersistencePending = false;
 let imageScalePersistenceTimer: number | undefined;
+let galleryZoomFrame: number | undefined;
+let galleryZoomTimer: number | undefined;
+let galleryZoomAnchor: GalleryScrollAnchor | undefined;
+let galleryWheelScale: number | undefined;
 let comparisonFormulaFitFrame: number | undefined;
 let activeDrag:
   | {
@@ -274,7 +276,11 @@ async function initialize(): Promise<void> {
       return;
     }
     initialFilter = getGalleryInitialFilter(window.location.search, bootstrap);
-    if (initialFilter) setToolbarCollapsed(true);
+    if (
+      initialFilter ||
+      new URLSearchParams(window.location.search).get("toolbar") === "collapsed"
+    )
+      setToolbarCollapsed(true);
     selectedLibraryID = initialFilter?.libraryID ?? bootstrap.defaultLibraryID;
     await loadLibrary(selectedLibraryID);
   } catch (error) {
@@ -286,10 +292,11 @@ async function initialize(): Promise<void> {
 
 function createLibraryLoader(
   api: FigureGalleryApi,
-): GalleryLibraryLoadCoordinator<EntryFilterLabels> {
+): GalleryLibraryLoadCoordinator<GalleryFilterLabels> {
   return new GalleryLibraryLoadCoordinator({
-    buildFilterOptions: () => buildEntryFilterLabels(),
-    commit: ({ entries, libraryID }, labels) => {
+    buildFilterOptions: () => buildGalleryFilterLabels(),
+    commit: ({ entries, libraryID, collections }, labels) => {
+      allCollections = collections;
       if (committedLibraryID !== libraryID) selectedEntryIDs.clear();
       committedLibraryID = libraryID;
       allEntries = entries;
@@ -338,8 +345,6 @@ function createLibraryLoader(
 function collectElements(): GalleryElements {
   return {
     batchStatus: requireElement("batch-status"),
-    collectionFilter: requireElement("collection-filter"),
-    documentFilter: requireElement("document-filter"),
     errorBanner: requireElement("error-banner"),
     filterToolbar: requireElement("filter-toolbar"),
     galleryGrid: requireElement("gallery-grid"),
@@ -356,8 +361,6 @@ function collectElements(): GalleryElements {
     state: requireElement("state"),
     stateMessage: requireElement("state-message"),
     toolbarToggle: requireElement("toolbar-toggle"),
-    typeFilter: requireElement("type-filter"),
-    yearFilter: requireElement("year-filter"),
   };
 }
 
@@ -376,6 +379,7 @@ function resolveGalleryApi(): FigureGalleryApi | undefined {
 }
 
 function bindControls(): void {
+  filterPanel = new GalleryFilterPanel(document, applyFilters);
   document.addEventListener("keydown", handleGalleryZoomKeydown, true);
   document.addEventListener("wheel", handleGalleryZoomWheel, {
     capture: true,
@@ -399,18 +403,21 @@ function bindControls(): void {
   elements.scaleRange.addEventListener("input", () => {
     setGalleryImageScale(Number(elements.scaleRange.value), true);
   });
+  elements.scaleValue.addEventListener("blur", () => {
+    setGalleryImageScale(
+      elements.scaleValue.value === ""
+        ? imageScale
+        : Number(elements.scaleValue.value),
+      true,
+    );
+  });
+  elements.scaleValue.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") elements.scaleValue.blur();
+  });
   elements.layoutModeToggle.addEventListener("click", toggleLayoutMode);
   elements.toolbarToggle.addEventListener("click", toggleToolbar);
   document.addEventListener("pointerdown", handleScaleOutsidePointerDown);
   document.addEventListener("keydown", handleScaleKeydown);
-  for (const select of [
-    elements.documentFilter,
-    elements.yearFilter,
-    elements.collectionFilter,
-    elements.typeFilter,
-  ]) {
-    select.addEventListener("change", scheduleFilterUpdate);
-  }
   elements.keywordFilter.addEventListener("input", () => {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(applyFilters, 120);
@@ -688,7 +695,21 @@ function handleGalleryDrop(event: DragEvent): void {
         galleryDropPreview?.target === target
           ? galleryDropPreview.position
           : getGalleryDropPosition(event, target);
-      if (dropPosition === "inside") {
+      if (
+        dropPosition === "inside" &&
+        target.classList.contains("is-empty") &&
+        filteredEntries.length !== allEntries.length &&
+        !comparisonRowsByID.get(target.dataset.viewRowId ?? "")?.isGroup
+      ) {
+        comparisonLayout = insertFigureGalleryComparisonRow(
+          comparisonLayout,
+          targetRowID,
+          {
+            documentID: activeDrag.documentID!,
+            entryID: activeDrag.entryID!,
+          },
+        );
+      } else if (dropPosition === "inside") {
         comparisonLayout = moveFigureGalleryComparisonEntry(
           comparisonLayout,
           activeDrag.documentID!,
@@ -1178,10 +1199,7 @@ function logGalleryError(error: unknown): void {
 function resetFilters(): void {
   window.clearTimeout(searchTimer);
   searchTimer = undefined;
-  elements.collectionFilter.value = "";
-  elements.documentFilter.value = "";
-  elements.yearFilter.value = "";
-  elements.typeFilter.value = "";
+  filterPanel.reset();
   elements.keywordFilter.value = "";
   applyFilters();
 }
@@ -1209,10 +1227,14 @@ function setToolbarCollapsed(collapsed: boolean): void {
     elements.toolbarToggle.title = label;
     elements.toolbarToggle.setAttribute("aria-label", label);
   }
-  if (collapsed) closeScalePopover();
+  if (collapsed) {
+    closeScalePopover();
+    filterPanel.close();
+  }
 }
 
 function toggleScalePopover(): void {
+  filterPanel.close();
   const open = elements.scalePopover.hidden;
   elements.scalePopover.hidden = !open;
   elements.scaleToggle.setAttribute("aria-expanded", String(open));
@@ -1246,11 +1268,17 @@ function handleGalleryZoomKeydown(event: KeyboardEvent): void {
       : event.key === "-" || event.code === "NumpadSubtract"
         ? -1
         : 0;
-  if (!direction) return;
+  const reset = event.key === "0" || event.code === "Numpad0";
+  if (!direction && !reset) return;
   event.preventDefault();
   event.stopPropagation();
   if (!controlsDisabled && !batchBusy)
-    setGalleryImageScale(imageScale + direction * GALLERY_SCALE_STEP, true);
+    setGalleryImageScale(
+      reset
+        ? FIGURE_GALLERY_IMAGE_SCALE_DEFAULT
+        : imageScale * Math.pow(1.1, direction),
+      true,
+    );
 }
 
 function handleGalleryZoomWheel(event: WheelEvent): void {
@@ -1264,11 +1292,20 @@ function handleGalleryZoomWheel(event: WheelEvent): void {
     return;
   event.preventDefault();
   event.stopPropagation();
-  if (!controlsDisabled && !batchBusy)
-    setGalleryImageScale(
-      imageScale - Math.sign(event.deltaY) * GALLERY_SCALE_STEP,
-      true,
-    );
+  if (controlsDisabled || batchBusy) return;
+  const unit =
+    event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+  const delta = Math.max(-240, Math.min(240, event.deltaY * unit));
+  const next = Math.min(
+    FIGURE_GALLERY_IMAGE_SCALE_MAX,
+    Math.max(
+      FIGURE_GALLERY_IMAGE_SCALE_MIN,
+      (galleryWheelScale ?? imageScale) * Math.exp(-delta * 0.002),
+    ),
+  );
+  setGalleryImageScale(next, true);
+  // Keep sub-percent trackpad movement instead of rounding every event away.
+  galleryWheelScale = next;
 }
 
 function handleScaleKeydown(event: KeyboardEvent): void {
@@ -1278,28 +1315,69 @@ function handleScaleKeydown(event: KeyboardEvent): void {
 }
 
 function setGalleryImageScale(value: number, persist: boolean): void {
-  const next = normalizeGalleryImageScale(value);
+  const next = normalizeImageScale(value);
   const changed = next !== imageScale;
-  const scrollAnchor = changed ? captureGalleryScrollAnchor() : undefined;
+  galleryWheelScale = undefined;
   imageScale = next;
   elements.scaleRange.value = String(next);
-  elements.scaleValue.textContent = `${next}%`;
+  elements.scaleValue.value = String(next);
+  if (persist) scheduleGalleryImageScalePersistence();
+  if (!changed) return;
+  if (galleryZoomTimer === undefined) {
+    galleryZoomAnchor = captureGalleryScrollAnchor();
+    sentinelObserver?.disconnect();
+  }
+  window.clearTimeout(galleryResizeTimer);
+  window.clearTimeout(galleryZoomTimer);
+  galleryZoomTimer = window.setTimeout(
+    finishGalleryZoom,
+    GALLERY_SCALE_SETTLE_MS,
+  );
+  if (galleryZoomFrame === undefined) {
+    galleryZoomFrame = window.requestAnimationFrame(applyGalleryZoomFrame);
+  }
+}
+
+function applyGalleryZoomFrame(): void {
+  galleryZoomFrame = undefined;
   applyGalleryDimensionVariables();
-  if (viewMode === "document-columns") {
+  restoreGalleryScrollAnchor(galleryZoomAnchor);
+}
+
+function finishGalleryZoom(): void {
+  if (galleryZoomFrame !== undefined) {
+    window.cancelAnimationFrame(galleryZoomFrame);
+    applyGalleryZoomFrame();
+  }
+  const anchor = galleryZoomAnchor;
+  cancelGalleryZoom();
+  if (disposed) return;
+  if (viewMode === "waterfall" && galleryRenderedCards.length) {
+    const count = calculateGalleryColumnCount();
+    if (count !== galleryColumnCount) {
+      reflowGalleryColumns(count, anchor);
+      return;
+    }
+    galleryColumnHeights = galleryColumns.map((column, index) =>
+      galleryColumnCardCounts[index]
+        ? column.getBoundingClientRect().height + GALLERY_COLUMN_GAP
+        : 0,
+    );
+  } else if (viewMode === "document-columns") {
     scheduleComparisonThumbnailFormulaFit();
   }
-  if (persist) scheduleGalleryImageScalePersistence();
-  if (!changed || !galleryRenderedCards.length || galleryColumnCount <= 0) {
-    if (changed && viewMode === "document-columns") {
-      restoreGalleryScrollAnchor(scrollAnchor);
-    }
-    return;
-  }
-  if (viewMode === "waterfall") {
-    reflowGalleryColumns(calculateGalleryColumnCount(), scrollAnchor);
-  } else {
-    restoreGalleryScrollAnchor(scrollAnchor);
-  }
+  removePaginationSentinel();
+  installPaginationSentinel();
+}
+
+function cancelGalleryZoom(): void {
+  if (galleryZoomFrame !== undefined)
+    window.cancelAnimationFrame(galleryZoomFrame);
+  window.clearTimeout(galleryZoomTimer);
+  galleryZoomFrame = undefined;
+  galleryZoomTimer = undefined;
+  galleryZoomAnchor = undefined;
+  galleryWheelScale = undefined;
 }
 
 function scheduleGalleryImageScalePersistence(): void {
@@ -1319,47 +1397,11 @@ function flushGalleryImageScalePersistence(): void {
   galleryApi?.setImageScale?.(imageScale);
 }
 
-function normalizeGalleryImageScale(value: number): number {
-  if (!Number.isFinite(value)) return FIGURE_GALLERY_IMAGE_SCALE_DEFAULT;
-  return Math.min(
-    FIGURE_GALLERY_IMAGE_SCALE_MAX,
-    Math.max(FIGURE_GALLERY_IMAGE_SCALE_MIN, Math.round(value)),
-  );
-}
-
 function applyGalleryDimensionVariables(): void {
-  const scale = imageScale / 100;
-  elements.galleryGrid.style.setProperty("--gallery-scale", String(scale));
-  const computedStyle = getComputedStyle(elements.galleryGrid);
-  const baseColumnWidth = parseGalleryDimension(
-    computedStyle?.getPropertyValue("--gallery-base-column-width") ?? "",
-    GALLERY_DEFAULT_COLUMN_WIDTH,
-  );
   elements.galleryGrid.style.setProperty(
-    "--gallery-column-width",
-    `${baseColumnWidth * scale}px`,
+    "--gallery-scale",
+    String(imageScale / 100),
   );
-  const baseDocumentWidth = parseGalleryDimension(
-    computedStyle?.getPropertyValue("--comparison-base-document-width") ?? "",
-    286,
-  );
-  const documentWidth = baseDocumentWidth * scale;
-  elements.galleryGrid.style.setProperty(
-    "--comparison-document-width",
-    `${documentWidth}px`,
-  );
-  elements.galleryGrid.style.setProperty(
-    "--comparison-thumbnail-size",
-    `${Math.min(
-      COMPARISON_THUMBNAIL_MAX_SIZE,
-      Math.max(COMPARISON_THUMBNAIL_MIN_SIZE, documentWidth / 5),
-    )}px`,
-  );
-}
-
-function parseGalleryDimension(value: string, fallback: number): number {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function toggleLayoutMode(): void {
@@ -1401,7 +1443,7 @@ async function loadLibrary(libraryID: number): Promise<void> {
   await libraryLoader?.load(libraryID);
 }
 
-async function buildEntryFilterLabels(): Promise<EntryFilterLabels> {
+async function buildGalleryFilterLabels(): Promise<GalleryFilterLabels> {
   const [
     figureLabel,
     tableLabel,
@@ -1410,6 +1452,9 @@ async function buildEntryFilterLabels(): Promise<EntryFilterLabels> {
     allCollections,
     allYears,
     allTypes,
+    invalidYear,
+    histogram,
+    noDocuments,
   ] = await Promise.all([
     localize("gallery-kind-figure"),
     localize("gallery-kind-table"),
@@ -1418,9 +1463,15 @@ async function buildEntryFilterLabels(): Promise<EntryFilterLabels> {
     localize("gallery-filter-all-collections"),
     localize("gallery-filter-all-years"),
     localize("gallery-filter-all-types"),
+    localize("gallery-year-invalid"),
+    localize("gallery-year-histogram"),
+    localize("gallery-document-empty"),
   ]);
   return {
     allLabels: [allDocuments, allCollections, allYears, allTypes],
+    invalidYear,
+    histogram,
+    noDocuments,
     kindLabels: {
       figure: figureLabel,
       formula: formulaLabel,
@@ -1429,100 +1480,31 @@ async function buildEntryFilterLabels(): Promise<EntryFilterLabels> {
   };
 }
 
-function populateEntryFilters(
-  state: Readonly<GalleryFacetState>,
-  labels: Readonly<EntryFilterLabels>,
-): void {
-  const [allDocuments, allCollections, allYears, allTypes] = labels.allLabels;
-  populateSelect(
-    elements.documentFilter,
-    state.documents,
-    allDocuments,
-    state.filters.documentID,
-    state.totals.documents,
-  );
-  populateSelect(
-    elements.collectionFilter,
-    state.collections,
-    allCollections,
-    state.filters.collectionID,
-    state.totals.collections,
-  );
-  populateSelect(
-    elements.yearFilter,
-    state.years,
-    allYears,
-    state.filters.year,
-    state.totals.years,
-  );
-  populateSelect(
-    elements.typeFilter,
-    state.kinds,
-    allTypes,
-    state.filters.kind,
-    state.totals.kinds,
-  );
-}
-
-function populateSelect(
-  select: HTMLSelectElement,
-  options: readonly CountedGalleryFilterOption[],
-  allLabel: string,
-  previousValue: string,
-  total: number,
-): void {
-  select.replaceChildren();
-  const all = document.createElement("option");
-  all.value = "";
-  all.textContent = formatGalleryOptionLabel(allLabel, total);
-  select.append(all);
-  for (const [value, label, count] of options) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = formatGalleryOptionLabel(label, count);
-    select.append(option);
-  }
-  if (hasOption(select, previousValue)) select.value = previousValue;
-}
-
-function hasOption(select: HTMLSelectElement, value: string): boolean {
-  for (let index = 0; index < select.options.length; index++) {
-    const option = select.options.item(index) as HTMLOptionElement | null;
-    if (option?.value === value) return true;
-  }
-  return false;
-}
-
-function scheduleFilterUpdate(): void {
-  if (filterUpdateScheduled) return;
-  filterUpdateScheduled = true;
-  void Promise.resolve().then(() => {
-    filterUpdateScheduled = false;
-    if (disposed) return;
-    applyFilters();
-  });
-}
-
 function applyFilters(documentID?: number): void {
   const labels = filterLabels;
   if (!labels) return;
   const facets = buildGalleryFacetState(
     allEntries,
     {
-      collectionID: elements.collectionFilter.value,
+      collectionID: filterPanel.values.collectionID,
       documentID:
         documentID === undefined
-          ? elements.documentFilter.value
+          ? filterPanel.values.documentID
           : String(documentID),
       keyword: elements.keywordFilter.value.trim(),
-      kind: elements.typeFilter.value,
-      year: elements.yearFilter.value,
+      kind: filterPanel.values.kind,
+      year: filterPanel.values.year,
     },
     labels.kindLabels,
+    allCollections,
   );
-  populateEntryFilters(facets, labels);
+  filterPanel.render(facets, labels, allCollections);
   activeKeyword = facets.filters.keyword;
-  filteredEntries = filterGalleryEntries(allEntries, facets.filters);
+  filteredEntries = filterGalleryEntries(
+    allEntries,
+    facets.filters,
+    allCollections,
+  );
   filteredEntryIDs = new Set(filteredEntries.map(({ id }) => id));
   if (selectionAnchorID && !filteredEntryIDs.has(selectionAnchorID))
     selectionAnchorID = undefined;
@@ -1530,12 +1512,16 @@ function applyFilters(documentID?: number): void {
     if (!filteredEntryIDs.has(id)) selectedEntryIDs.delete(id);
   }
   updateSelectionControls();
-  renderResults();
+  renderResults({ resetComparisonRows: true });
 }
 
 function renderResults(
-  options: { preserveComparisonCards?: boolean } = {},
+  options: {
+    preserveComparisonCards?: boolean;
+    resetComparisonRows?: boolean;
+  } = {},
 ): void {
+  cancelGalleryZoom();
   const preserveComparisonCards =
     options.preserveComparisonCards === true && viewMode === "document-columns";
   const reusableCards = preserveComparisonCards
@@ -1543,7 +1529,7 @@ function renderResults(
     : undefined;
   closeGalleryContextMenu();
   const minimumComparisonRows =
-    viewMode === "document-columns"
+    viewMode === "document-columns" && !options.resetComparisonRows
       ? Math.max(COMPARISON_ROW_PAGE_SIZE, renderedComparisonRowCount)
       : COMPARISON_ROW_PAGE_SIZE;
   if (!preserveComparisonCards) {
@@ -1553,6 +1539,7 @@ function renderResults(
   renderedComparisonRowCount = 0;
   if (!preserveComparisonCards) imageObserver?.disconnect();
   sentinelObserver?.disconnect();
+  cancelComparisonRendering();
   comparisonCardReuse = reusableCards;
   elements.galleryGrid.replaceChildren();
   galleryColumns = [];
@@ -1611,23 +1598,26 @@ function createComparisonBoard(
 ): void {
   const layout = comparisonLayout;
   if (!layout) return;
-  const filteredDocumentIDs = new Set(
-    filteredEntries.map(({ documentItemID }) => documentItemID),
-  );
-  comparisonDocumentIDs = layout.documentOrder.filter((documentID) =>
-    filteredDocumentIDs.has(documentID),
-  );
   const filtersActive = filteredEntries.length !== allEntries.length;
-  comparisonRows = layout.rows.filter((row) => {
-    const hasVisibleEntry = comparisonDocumentIDs.some((documentID) => {
-      const cell = row.entries[String(documentID)];
-      return cell?.entryIDs.some((entryID) => filteredEntryIDs.has(entryID));
-    });
-    return (
-      hasVisibleEntry ||
-      (!filtersActive && Object.keys(row.entries).length === 0)
-    );
-  });
+  const visibleLayout = filtersActive
+    ? filterFigureGalleryComparisonLayout(layout, filteredEntries)
+    : layout;
+  comparisonDocumentIDs = visibleLayout.documentOrder;
+  comparisonRows = visibleLayout.rows;
+  comparisonRowsByID = new Map(comparisonRows.map((row) => [row.id, row]));
+  comparisonSourceRowIDs = new Map();
+  for (const row of layout.rows)
+    for (const cell of Object.values(row.entries))
+      for (const id of cell.entryIDs) comparisonSourceRowIDs.set(id, row.id);
+  const documents = new Map<
+    number,
+    { entry: FigureGalleryEntry; count: number }
+  >();
+  for (const entry of filteredEntries) {
+    const document = documents.get(entry.documentItemID);
+    if (document) document.count++;
+    else documents.set(entry.documentItemID, { entry, count: 1 });
+  }
   elements.galleryGrid.style.setProperty(
     "--comparison-document-count",
     String(comparisonDocumentIDs.length),
@@ -1640,9 +1630,22 @@ function createComparisonBoard(
   corner.append(cornerLabel);
   elements.galleryGrid.append(corner);
   for (const documentID of comparisonDocumentIDs) {
-    elements.galleryGrid.append(createComparisonDocumentHeader(documentID));
+    const { entry, count } = documents.get(documentID)!;
+    elements.galleryGrid.append(createComparisonDocumentHeader(entry, count));
   }
   if (!preserveComparisonCards) createObservers(version);
+  comparisonCellObserver = new IntersectionObserver(
+    (changes) => {
+      if (disposed || version !== renderVersion) return;
+      for (const change of changes) {
+        const cell = change.target as HTMLElement;
+        if (change.isIntersecting) pendingComparisonCells.add(cell);
+        else pendingComparisonCells.delete(cell);
+      }
+      scheduleComparisonRendering(version);
+    },
+    { rootMargin: "320px" },
+  );
   do {
     appendNextComparisonRows(version);
   } while (
@@ -1673,20 +1676,29 @@ function calculateGalleryColumnCount(): number {
   const width = elements.galleryGrid.getBoundingClientRect().width;
   const computedStyle = getComputedStyle(elements.galleryGrid);
   const configuredWidth = Number.parseFloat(
-    computedStyle?.getPropertyValue("--gallery-column-width") ?? "",
+    computedStyle?.getPropertyValue("--gallery-base-column-width") ?? "",
   );
   return getFigureGalleryColumnCount(
     width,
     Number.isFinite(configuredWidth)
-      ? configuredWidth
-      : GALLERY_DEFAULT_COLUMN_WIDTH,
+      ? (configuredWidth * imageScale) / 100
+      : (GALLERY_DEFAULT_COLUMN_WIDTH * imageScale) / 100,
     GALLERY_COLUMN_GAP,
   );
 }
 
 function installGalleryResizeObserver(): void {
+  let lastWidth = 0;
   galleryResizeObserver = new ResizeObserver(() => {
-    if (disposed || elements.galleryGrid.hidden) return;
+    if (
+      disposed ||
+      elements.galleryGrid.hidden ||
+      galleryZoomTimer !== undefined
+    )
+      return;
+    const width = document.documentElement.clientWidth;
+    if (width === lastWidth) return;
+    lastWidth = width;
     applyGalleryDimensionVariables();
     if (viewMode !== "waterfall") {
       scheduleComparisonThumbnailFormulaFit();
@@ -1704,6 +1716,7 @@ function installGalleryResizeObserver(): void {
       galleryResizeTimer = undefined;
       if (
         disposed ||
+        galleryZoomTimer !== undefined ||
         elements.galleryGrid.hidden ||
         filteredEntries.length === 0
       ) {
@@ -1774,7 +1787,10 @@ function createObservers(version: number): void {
     { rootMargin: "320px 0px" },
   );
   sentinelObserver = new IntersectionObserver((changes) => {
-    if (changes.some(({ isIntersecting }) => isIntersecting)) {
+    if (
+      galleryZoomTimer === undefined &&
+      changes.some(({ isIntersecting }) => isIntersecting)
+    ) {
       appendNextPage(version);
     }
   });
@@ -1847,16 +1863,14 @@ function removePaginationSentinel(): void {
   sentinel?.remove();
 }
 
-function createComparisonDocumentHeader(documentID: number): HTMLElement {
-  const entry =
-    filteredEntries.find(
-      ({ documentItemID }) => documentItemID === documentID,
-    ) ?? allEntries.find(({ documentItemID }) => documentItemID === documentID);
-  if (!entry) throw new Error("Comparison document is unavailable");
+function createComparisonDocumentHeader(
+  entry: FigureGalleryEntry,
+  resultCount: number,
+): HTMLElement {
   const header = document.createElement("header");
   header.className = "comparison-document-header";
   header.draggable = true;
-  header.dataset.documentId = String(documentID);
+  header.dataset.documentId = String(entry.documentItemID);
 
   const text = document.createElement("div");
   text.className = "comparison-document-text";
@@ -1866,9 +1880,6 @@ function createComparisonDocumentHeader(documentID: number): HTMLElement {
   const meta = document.createElement("div");
   meta.className = "comparison-document-meta";
   if (entry.year) meta.append(textElement("span", entry.year));
-  const resultCount = filteredEntries.filter(
-    ({ documentItemID }) => documentItemID === documentID,
-  ).length;
   const count = document.createElement("span");
   setLocalizedText(count, "gallery-comparison-result-count", {
     count: resultCount,
@@ -1933,34 +1944,16 @@ function appendComparisonRow(
     cell.className = "comparison-cell";
     cell.dataset.documentId = String(documentID);
     cell.dataset.rowId = row.id;
+    cell.dataset.viewRowId = row.id;
     const storedCell = row.entries[String(documentID)];
     const entries = getVisibleComparisonCellEntries(storedCell);
     if (entries.length) {
-      const primaryEntry =
-        entries.find(({ id }) => id === storedCell?.primaryEntryID) ??
-        entries[0]!;
-      const card =
-        takeReusableComparisonCard(primaryEntry.id) ??
-        createCard(primaryEntry, version, true);
-      configureComparisonEntryElement(card, primaryEntry, row.id, documentID);
-      galleryRenderedCards.push(card);
-      if (entries.length === 1) {
-        cell.append(card);
+      cell.dataset.rowId = comparisonSourceRowIDs.get(entries[0].id) ?? row.id;
+      if (entries.some(({ id }) => comparisonCardReuse?.has(id))) {
+        populateComparisonCell(cell, row, documentID, version);
       } else {
-        cell.classList.add("has-multiple");
-        const content = document.createElement("div");
-        content.className = "comparison-cell-content";
-        content.append(
-          card,
-          createComparisonPager(
-            entries,
-            primaryEntry.id,
-            row.id,
-            documentID,
-            version,
-          ),
-        );
-        cell.append(content);
+        cell.classList.add("is-pending");
+        comparisonCellObserver?.observe(cell);
       }
       renderedCount += entries.length;
     } else {
@@ -1969,6 +1962,82 @@ function appendComparisonRow(
     cells.push(cell);
   }
   elements.galleryGrid.append(...cells);
+}
+
+function populateComparisonCell(
+  cell: HTMLElement,
+  row: FigureGalleryComparisonRow,
+  documentID: number,
+  version: number,
+): void {
+  const storedCell = row.entries[String(documentID)];
+  const entries = getVisibleComparisonCellEntries(storedCell);
+  if (!entries.length) return;
+  const primaryEntry =
+    entries.find(({ id }) => id === storedCell?.primaryEntryID) ?? entries[0]!;
+  const card =
+    takeReusableComparisonCard(primaryEntry.id) ??
+    createCard(primaryEntry, version, true);
+  const rowID = cell.dataset.rowId!;
+  configureComparisonEntryElement(card, primaryEntry, rowID, documentID);
+  galleryRenderedCards.push(card);
+  if (entries.length === 1) {
+    cell.append(card);
+  } else {
+    cell.classList.add("has-multiple");
+    const content = document.createElement("div");
+    content.className = "comparison-cell-content";
+    content.append(
+      card,
+      createComparisonPager(
+        entries,
+        primaryEntry.id,
+        rowID,
+        documentID,
+        version,
+      ),
+    );
+    cell.append(content);
+  }
+  cell.classList.remove("is-pending");
+}
+
+function scheduleComparisonRendering(version: number): void {
+  if (comparisonRenderFrame !== undefined || !pendingComparisonCells.size)
+    return;
+  comparisonRenderFrame = window.requestAnimationFrame(() => {
+    comparisonRenderFrame = undefined;
+    if (disposed || version !== renderVersion) return;
+    const started = performance.now();
+    let rendered = 0;
+    for (const cell of pendingComparisonCells) {
+      pendingComparisonCells.delete(cell);
+      comparisonCellObserver?.unobserve(cell);
+      const row = comparisonRowsByID.get(cell.dataset.viewRowId!);
+      if (cell.isConnected && row) {
+        populateComparisonCell(
+          cell,
+          row,
+          Number(cell.dataset.documentId),
+          version,
+        );
+        rendered++;
+      }
+      if (rendered >= 12 || performance.now() - started >= 8) break;
+    }
+    scheduleComparisonRendering(version);
+  });
+}
+
+function cancelComparisonRendering(): void {
+  comparisonCellObserver?.disconnect();
+  comparisonCellObserver = undefined;
+  if (comparisonRenderFrame !== undefined)
+    window.cancelAnimationFrame(comparisonRenderFrame);
+  comparisonRenderFrame = undefined;
+  pendingComparisonCells.clear();
+  comparisonRowsByID.clear();
+  comparisonSourceRowIDs.clear();
 }
 
 function getVisibleComparisonCellEntries(
@@ -2179,6 +2248,7 @@ function startComparisonRowLabelEdit(
       comparisonLayout,
       row.id,
       input.value,
+      filteredEntries.length !== allEntries.length ? row : undefined,
     );
     persistComparisonLayout();
     renderResults();
@@ -2367,12 +2437,6 @@ function applyFormulaLatexUpdate(entryID: string, latex: string): void {
   const entry = entriesByID.get(entryID);
   if (!entry || entry.kind !== "formula") return;
   entry.latex = latex || undefined;
-  if (viewMode === "document-columns") {
-    const viewport = captureGalleryViewport();
-    renderResults();
-    restoreGalleryViewport(viewport);
-    return;
-  }
   const card = galleryRenderedCards.find(
     (candidate) => candidate.dataset.id === entryID,
   );
@@ -2529,6 +2593,7 @@ async function openSource(
 
 function dispose(): void {
   disposed = true;
+  cancelGalleryZoom();
   document.removeEventListener("keydown", handleGalleryZoomKeydown, true);
   document.removeEventListener("wheel", handleGalleryZoomWheel, true);
   closeGalleryContextMenu();
@@ -2551,6 +2616,7 @@ function dispose(): void {
   renderVersion++;
   imageLoader?.dispose();
   imageObserver?.disconnect();
+  cancelComparisonRendering();
   sentinelObserver?.disconnect();
   galleryResizeObserver?.disconnect();
 }
@@ -2574,6 +2640,7 @@ function setVisible(element: HTMLElement, visible: boolean): void {
 function setControlsDisabled(disabled: boolean): void {
   controlsDisabled = disabled;
   elements.galleryGrid.inert = disabled;
+  if (disabled) filterPanel.close();
   const controls = document.querySelectorAll("button, input, select");
   for (let index = 0; index < controls.length; index++) {
     const control = controls.item(index) as

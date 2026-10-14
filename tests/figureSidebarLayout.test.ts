@@ -726,10 +726,16 @@ test("analysis updates controls without rebuilding cards and reloads once", () =
     countMatches(runAnalysis, /refreshSidebarControls\(reader\)/g),
     2,
   );
-  assert.equal(countMatches(runAnalysis, /reloadSidebarResults\(reader\)/g), 1);
+  assert.equal(
+    countMatches(
+      runAnalysis,
+      /reloadSidebarResults\(reader, recognizedRegions\)/g,
+    ),
+    1,
+  );
   assert.doesNotMatch(runAnalysis, /\.refresh\(\)/);
   assert.ok(
-    runAnalysis.lastIndexOf("reloadSidebarResults(reader)") >
+    runAnalysis.lastIndexOf("reloadSidebarResults(reader, recognizedRegions)") >
       runAnalysis.indexOf("finally"),
   );
 });

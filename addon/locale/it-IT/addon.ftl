@@ -249,3 +249,21 @@ prompt-figure-caption = Didascalia della figura:
 
 sidebar-pin-floating = Mantieni questa immagine in primo piano
 sidebar-unpin-floating = Sblocca immagine (poi premi Esc ovunque per chiudere)
+
+gallery-browse-title = Collezioni e documenti
+gallery-collection-descendants = Include le sottocollezioni
+gallery-document-search =
+    .placeholder = Cerca documenti nella collezione
+    .aria-label = Cerca documenti nella collezione
+gallery-document-empty = Nessun documento corrispondente
+gallery-year-histogram = Risultati per anno · fai clic su una barra
+gallery-year-input-label = Anno o intervallo
+gallery-year-apply = Applica
+gallery-year-invalid = Inserisci un anno di quattro cifre o un intervallo come 2020–2024 (inizio ≤ fine).
+
+sidebar-correct-caption = Correggi didascalia
+caption-selection-hint = Seleziona la didascalia corretta; al rilascio il testo PDF viene letto localmente e sostituisce la didascalia. Esc o clic destro per annullare.
+caption-selection-no-text = Nessun testo PDF leggibile nella selezione. La didascalia originale è invariata. Le scansioni senza testo richiedono OCR; nessun servizio a pagamento è stato usato. Puoi inserire il testo con Modifica didascalia.
+caption-selection-result-missing = Il risultato non esiste più. Nessuna didascalia salvata.
+progress-correct-caption = Lettura locale della didascalia selezionata…
+progress-correct-caption-done = Didascalia corretta dal testo PDF selezionato.

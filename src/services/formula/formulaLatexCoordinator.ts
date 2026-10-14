@@ -116,26 +116,29 @@ export class FormulaLatexCoordinator {
     this.listeners.clear();
   }
 
-  public recognizeAttachment(item: Zotero.Item): void {
+  public async recognizeAttachment(
+    item: Zotero.Item,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (this.lifecycleController.signal.aborted) return;
-    void this.resultStore
-      .list(item)
-      .then((results) => {
-        if (this.lifecycleController.signal.aborted) return;
-        for (const result of results) {
-          if (result.kind !== "formula") continue;
-          if (!result.latex && this.isAutoEnabled()) {
-            void this.recognize(item, result).catch((error) => {
-              if (!isCancellationError(error)) {
-                this.platform.logError(toError(error));
-              }
-            });
-          }
+    try {
+      throwIfAborted(signal);
+      const results = await this.resultStore.list(item);
+      for (const result of results) {
+        throwIfAborted(signal);
+        throwIfAborted(this.lifecycleController.signal);
+        if (!this.isAutoEnabled()) break;
+        if (result.kind !== "formula" || result.latex) continue;
+        try {
+          await this.recognize(item, result, { signal });
+        } catch (error) {
+          if (isCancellationError(error)) return;
+          this.platform.logError(toError(error));
         }
-      })
-      .catch((error) => {
-        if (!isCancellationError(error)) this.platform.logError(toError(error));
-      });
+      }
+    } catch (error) {
+      if (!isCancellationError(error)) this.platform.logError(toError(error));
+    }
   }
 
   public async recognizeStoredFormulae(

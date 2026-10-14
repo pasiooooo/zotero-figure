@@ -4,9 +4,11 @@ const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 export type FigureSidebarIconKind =
   | FigureResultKind
+  | "all"
   | "annotation"
   | "check"
   | "expand"
+  | "folder"
   | "languages"
   | "loading"
   | "menu"
@@ -76,6 +78,17 @@ export function getFigureSidebarIconParts(
   kind: FigureSidebarIconKind,
 ): Array<[string, Record<string, string>]> {
   switch (kind) {
+    case "all":
+      return [["path", { d: "M12 4v16M5 8l14 8M5 16l14-8" }]];
+    case "folder":
+      return [
+        [
+          "path",
+          {
+            d: "M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 1h18",
+          },
+        ],
+      ];
     case "expand":
       return [["path", { d: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" }]];
     case "region":

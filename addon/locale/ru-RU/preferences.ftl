@@ -2,7 +2,7 @@ preferences-section-interface = Интерфейс
 preferences-interface-reader-title = Боковая панель PDF
 preferences-interface-reader-description = Откройте любой PDF, разверните левую боковую панель и нажмите значок PDF Figure (pasiooooo), чтобы показать панель плагина.
 preferences-interface-gallery-title = Библиотека PDF Figure (pasiooooo)
-preferences-interface-gallery-description = Выберите «Инструменты → Библиотека PDF Figure (pasiooooo)» в строке меню или используйте кнопку справа.
+preferences-interface-gallery-description = Нажмите значок библиотеки PDF Figure на панели инструментов главного окна или кнопку справа.
 preferences-interface-gallery-open =
     .label = Открыть библиотеку PDF Figure (pasiooooo)
 preferences-section-model = Модель
@@ -41,3 +41,7 @@ preferences-about-github = 🔍 GitHub разработчика форка
 preferences-about-upstream = Исходный проект: MuiseDestiny / Zotero Figure
 preferences-about-bilibili = 📺 Bilibili первоначального автора
 preferences-about-pro-plugins = 🎊 Pro-плагины первоначального автора
+
+preferences-auto-analyze-new-pdfs =
+    .label = Автоматически анализировать новые PDF
+preferences-auto-analyze-new-pdfs-description = По умолчанию выключено. Новые локальные PDF обрабатываются по одному; уже проанализированные пропускаются. Отключение отменяет автоматические задачи и очищает очередь. Синхронизация аннотаций и распознавание формул используют отдельные настройки.

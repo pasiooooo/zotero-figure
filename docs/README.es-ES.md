@@ -38,7 +38,7 @@ No se necesitan Java ni `pdffigures2.jar`.
 ## Puntos de entrada
 
 - **Reader PDF:** Abre un PDF, selecciona el icono de Zotero Figure en la barra lateral izquierda y elige analizar figuras, tablas y fórmulas.
-- **Biblioteca de figuras:** Abre `Tools > PDF Figure Library` para explorar resultados de varios documentos. Haz doble clic en una tarjeta para abrir el PDF de origen.
+- **Biblioteca de figuras:** Haz clic en el icono PDF Figure Library de la barra de herramientas de la ventana principal, a la izquierda del cuadro de búsqueda, para explorar resultados de varios documentos. Haz doble clic en una tarjeta para abrir el PDF de origen.
 - **Procesamiento por lotes:** Selecciona elementos de la biblioteca o adjuntos PDF, haz clic con el botón derecho y abre `PDF Figure (pasiooooo) >` para analizar, añadir resultados a notas o crear anotaciones. Selecciona anotaciones de imagen y elige `Añadir a Figure` para importarlas por lotes.
 - **Preferencias:** Abre el panel de preferencias de PDF Figure para gestionar el modelo integrado, la sincronización de anotaciones y el OCR de fórmulas, o para abrir directamente la Biblioteca de figuras. Usa **Convertir fórmulas existentes** para reconocer fórmulas sin caché en todas las bibliotecas.
 

@@ -2,7 +2,7 @@ preferences-section-interface = 界面
 preferences-interface-reader-title = PDF 侧边栏
 preferences-interface-reader-description = 打开任一 PDF，展开左侧边栏，然后点击 PDF Figure (pasiooooo) 图标，即可显示插件侧边栏。
 preferences-interface-gallery-title = PDF 图表库 (pasiooooo)
-preferences-interface-gallery-description = 点击顶部菜单“工具 → PDF 图表库”，或使用右侧按钮直接打开。
+preferences-interface-gallery-description = 点击主窗口工具栏中的 PDF 图表库图标，或使用右侧按钮直接打开。
 preferences-interface-gallery-open =
     .label = 打开 PDF 图表库
 preferences-section-model = 模型
@@ -41,3 +41,7 @@ preferences-about-github = 🔍 查看分支维护者的 GitHub
 preferences-about-upstream = 原项目：MuiseDestiny / Zotero Figure
 preferences-about-bilibili = 📺 查看原作者的哔哩哔哩
 preferences-about-pro-plugins = 🎊 查看原作者的 Pro 插件
+
+preferences-auto-analyze-new-pdfs =
+    .label = 自动分析新添加的 PDF
+preferences-auto-analyze-new-pdfs-description = 默认关闭。开启后仅处理新添加且已下载的 PDF，逐份排队，已解析的自动跳过；关闭后取消自动任务并清空队列。遵循批注同步与公式自动识别的独立设置。

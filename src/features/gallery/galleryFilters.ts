@@ -1,4 +1,7 @@
-import type { FigureGalleryEntry } from "../../domain/figureGallery";
+import type {
+  FigureGalleryCollection,
+  FigureGalleryEntry,
+} from "../../domain/figureGallery";
 import type { FigureResultKind } from "../../domain/figureResults";
 
 export type CountedGalleryFilterOption = readonly [
@@ -48,32 +51,46 @@ export function buildGalleryFilterOptions(
   };
 }
 
-/**
- * Builds each facet from entries matching every other active filter. Invalid
- * combinations are cleared and recomputed so the view cannot retain a select
- * value that has no matching option.
- */
 export function buildGalleryFacetState(
   entries: readonly FigureGalleryEntry[],
   requestedFilters: Readonly<GalleryFilterValues>,
   kindLabels: Readonly<Record<FigureResultKind, string>>,
+  collections: readonly FigureGalleryCollection[] = [],
 ): GalleryFacetState {
-  let filters: GalleryFilterValues = { ...requestedFilters };
-  for (let attempt = 0; attempt <= 4; attempt++) {
-    const options = buildFacetOptions(entries, filters, kindLabels);
-    const nextFilters = retainAvailableFilters(filters, options);
-    if (galleryFiltersMatch(filters, nextFilters) || attempt === 4) {
-      return { ...options, filters: nextFilters };
-    }
-    filters = nextFilters;
-  }
-  throw new Error("Gallery facet stabilization did not complete");
+  // Only discard deleted values, never broaden a valid zero-result search.
+  const available = buildGalleryFilterOptions(entries, kindLabels);
+  const filters = {
+    ...requestedFilters,
+    collectionID: retainAvailableValue(requestedFilters.collectionID, [
+      ...available.collections,
+      ...collections.map(
+        ({ id, name }): CountedGalleryFilterOption => [String(id), name, 0],
+      ),
+    ]),
+    documentID: retainAvailableValue(
+      requestedFilters.documentID,
+      available.documents,
+    ),
+    kind: ["", "figure", "table", "formula"].includes(requestedFilters.kind)
+      ? requestedFilters.kind
+      : "",
+  };
+  return {
+    ...buildFacetOptions(entries, filters, kindLabels, collections),
+    filters,
+  };
 }
 
 export function filterGalleryEntries(
   entries: readonly FigureGalleryEntry[],
   filters: Readonly<GalleryFilterValues>,
+  collections: readonly FigureGalleryCollection[] = [],
 ): FigureGalleryEntry[] {
+  const collectionIDs = getGalleryCollectionScope(
+    filters.collectionID,
+    collections,
+  );
+  const years = parseGalleryYearRange(filters.year);
   return entries.filter((entry) => {
     if (
       filters.documentID &&
@@ -81,10 +98,17 @@ export function filterGalleryEntries(
     ) {
       return false;
     }
-    if (filters.year && entry.year !== filters.year) return false;
+    if (
+      filters.year &&
+      (!years ||
+        !entry.year ||
+        Number(entry.year) < years[0] ||
+        Number(entry.year) > years[1])
+    )
+      return false;
     if (
       filters.collectionID &&
-      !entry.collectionIDs.some((id) => String(id) === filters.collectionID)
+      !entry.collectionIDs.some((id) => collectionIDs.has(String(id)))
     ) {
       return false;
     }
@@ -113,19 +137,52 @@ function buildFacetOptions(
   entries: readonly FigureGalleryEntry[],
   filters: Readonly<GalleryFilterValues>,
   kindLabels: Readonly<Record<FigureResultKind, string>>,
+  collections: readonly FigureGalleryCollection[],
 ): GalleryFilterOptions & { totals: GalleryFilterTotals } {
-  const collectionEntries = filterGalleryEntries(entries, {
-    ...filters,
-    collectionID: "",
+  const collectionEntries = filterGalleryEntries(
+    entries,
+    {
+      ...filters,
+      collectionID: "",
+      documentID: "",
+    },
+    collections,
+  );
+  const documentEntries = filterGalleryEntries(
+    entries,
+    {
+      ...filters,
+      documentID: "",
+    },
+    collections,
+  );
+  const kindEntries = filterGalleryEntries(
+    entries,
+    { ...filters, kind: "" },
+    collections,
+  );
+  const yearEntries = filterGalleryEntries(
+    entries,
+    { ...filters, year: "" },
+    collections,
+  );
+  const parents = new Map(
+    collections.map(({ id, parentID }) => [id, parentID]),
+  );
+  const names = new Map(collections.map(({ id, name }) => [id, name]));
+  const collectionOptions = countOptions(collectionEntries, (entry) => {
+    const ids = new Set(entry.collectionIDs);
+    for (const id of ids) {
+      const parent = parents.get(id);
+      if (parent) ids.add(parent);
+    }
+    return [...ids].map((id) => [
+      String(id),
+      names.get(id) ?? entry.collectionNames[entry.collectionIDs.indexOf(id)],
+    ]);
   });
-  const documentEntries = filterGalleryEntries(entries, {
-    ...filters,
-    documentID: "",
-  });
-  const kindEntries = filterGalleryEntries(entries, { ...filters, kind: "" });
-  const yearEntries = filterGalleryEntries(entries, { ...filters, year: "" });
   return {
-    collections: buildCollectionOptions(collectionEntries),
+    collections: collectionOptions,
     documents: buildDocumentOptions(documentEntries),
     kinds: buildKindOptions(kindEntries, kindLabels),
     totals: {
@@ -176,22 +233,6 @@ function buildYearOptions(
   ).sort((first, second) => second[0].localeCompare(first[0]));
 }
 
-function retainAvailableFilters(
-  filters: Readonly<GalleryFilterValues>,
-  options: Readonly<GalleryFilterOptions>,
-): GalleryFilterValues {
-  return {
-    collectionID: retainAvailableValue(
-      filters.collectionID,
-      options.collections,
-    ),
-    documentID: retainAvailableValue(filters.documentID, options.documents),
-    keyword: filters.keyword,
-    kind: retainAvailableValue(filters.kind, options.kinds),
-    year: retainAvailableValue(filters.year, options.years),
-  };
-}
-
 function retainAvailableValue(
   value: string,
   options: readonly CountedGalleryFilterOption[],
@@ -201,17 +242,89 @@ function retainAvailableValue(
     : "";
 }
 
-function galleryFiltersMatch(
-  first: Readonly<GalleryFilterValues>,
-  second: Readonly<GalleryFilterValues>,
-): boolean {
-  return (
-    first.collectionID === second.collectionID &&
-    first.documentID === second.documentID &&
-    first.keyword === second.keyword &&
-    first.kind === second.kind &&
-    first.year === second.year
+export function parseGalleryYearRange(
+  value: string,
+): readonly [number, number] | undefined {
+  const match = value.trim().match(/^(\d{4})(?:\s*[-–—至]\s*(\d{4}))?$/);
+  if (!match) return undefined;
+  const first = Number(match[1]);
+  const last = Number(match[2] ?? match[1]);
+  return first >= 1000 && last <= 9999 && first <= last
+    ? [first, last]
+    : undefined;
+}
+
+export function buildGalleryYearHistogram(
+  options: readonly CountedGalleryFilterOption[],
+  yearRange: string,
+): Array<{ year: number; count: number }> {
+  const range = parseGalleryYearRange(yearRange);
+  if (yearRange.trim() && !range) return [];
+  const counts = new Map(
+    options
+      .filter(([year]) => /^\d{4}$/.test(year) && Number(year) >= 1000)
+      .map(([year, , count]) => [Number(year), count]),
   );
+  const years = [...counts.keys()];
+  const first = range?.[0] ?? Math.min(...years);
+  const last = range?.[1] ?? Math.max(...years);
+  const bins: Array<{ year: number; count: number }> = [];
+  for (let year = first; year <= last; year++)
+    bins.push({ year, count: counts.get(year) ?? 0 });
+  return bins;
+}
+
+function getGalleryCollectionScope(
+  id: string,
+  collections: readonly FigureGalleryCollection[],
+): Set<string> {
+  const ids = new Set([id]);
+  const children = new Map<string, string[]>();
+  for (const collection of collections) {
+    const parent = String(collection.parentID);
+    children.set(parent, [
+      ...(children.get(parent) ?? []),
+      String(collection.id),
+    ]);
+  }
+  for (const parent of ids)
+    for (const child of children.get(parent) ?? []) ids.add(child);
+  return ids;
+}
+
+export function buildGalleryCollectionTree(
+  collections: readonly FigureGalleryCollection[],
+): Array<FigureGalleryCollection & { depth: number }> {
+  const known = new Set(collections.map(({ id }) => id));
+  const children = new Map<number | null, FigureGalleryCollection[]>();
+  for (const collection of collections) {
+    const parent =
+      collection.parentID && known.has(collection.parentID)
+        ? collection.parentID
+        : null;
+    children.set(parent, [...(children.get(parent) ?? []), collection]);
+  }
+  const result: Array<FigureGalleryCollection & { depth: number }> = [];
+  const visited = new Set<number>();
+  function visit(
+    nodes: readonly FigureGalleryCollection[],
+    depth: number,
+  ): void {
+    for (const node of [...nodes].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      if (visited.has(node.id)) continue;
+      visited.add(node.id);
+      result.push({ ...node, depth });
+      visit(children.get(node.id) ?? [], depth + 1);
+    }
+  }
+  visit(children.get(null) ?? [], 0);
+  visit(
+    collections.filter(({ id }) => !visited.has(id)),
+    0,
+  );
+  return result;
 }
 
 function countOptions(

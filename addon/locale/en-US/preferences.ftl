@@ -2,7 +2,7 @@ preferences-section-interface = Interface
 preferences-interface-reader-title = PDF Reader sidebar
 preferences-interface-reader-description = Open any PDF, expand the left sidebar, and select the PDF Figure (pasiooooo) icon to show the plugin sidebar.
 preferences-interface-gallery-title = PDF Figure (pasiooooo) Library
-preferences-interface-gallery-description = Choose Tools → PDF Figure (pasiooooo) Library from the menu bar, or use the button on the right.
+preferences-interface-gallery-description = Click the PDF Figure Library icon in the main window toolbar, or use the button on the right.
 preferences-interface-gallery-open =
     .label = Open PDF Figure (pasiooooo) Library
 preferences-section-model = Model
@@ -41,3 +41,7 @@ preferences-about-github = 🔍 See fork maintainer's GitHub
 preferences-about-upstream = Upstream: MuiseDestiny / Zotero Figure
 preferences-about-bilibili = 📺 See original author's Bilibili
 preferences-about-pro-plugins = 🎊 See original author's Pro plugins
+
+preferences-auto-analyze-new-pdfs =
+    .label = Automatically analyze newly added PDFs
+preferences-auto-analyze-new-pdfs-description = Off by default. Queue new, locally available PDFs one at a time and skip existing analyses. Turning this off cancels automatic work and clears the queue. Annotation sync and automatic formula recognition follow their separate settings.

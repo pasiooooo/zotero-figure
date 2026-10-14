@@ -14,6 +14,24 @@ const script = readFileSync(
 const hooks = readFileSync("src/hooks.ts", "utf8");
 const rootSelector = "#zotero-prefpane-__addonRef__";
 
+test("automatic PDF analysis has an opt-in preference with immediate binding", () => {
+  assert.match(
+    readFileSync("addon/prefs.js", "utf8"),
+    /autoAnalyzeNewPdfs", false/,
+  );
+  assert.match(markup, /id="auto-analyze-new-pdfs"/);
+  assert.match(
+    script,
+    /setPref\("autoAnalyzeNewPdfs", this.autoAnalyzeNewPdfs.checked\)/,
+  );
+  assert.match(
+    script,
+    /this.autoAnalyzeNewPdfs.checked = getPref\("autoAnalyzeNewPdfs"\) === true/,
+  );
+  assert.match(hooks, /autoAnalysisController.start\(\)/);
+  assert.match(hooks, /autoAnalysisController.dispose\(\)/);
+});
+
 test("shows model maintenance, annotation sync, and verified formula API preferences", () => {
   const styles = getInlineStyles();
   const helpIcon = getRule(`${rootSelector} .help-icon`);
@@ -133,7 +151,7 @@ test("opens the existing figure gallery from preferences", () => {
   assert.match(hooks, /openGallery: openFigureGallery/);
   assert.match(hooks, /galleryControllers\.get\(mainWindow\)/);
   assert.match(hooks, /controller\.open\(\)/);
-  assert.match(hooks, /mainWindow\.focus\(\)/);
+  assert.doesNotMatch(hooks, /mainWindow\.focus\(\)/);
 });
 
 test("invalidates and cancels stale formula API work", () => {

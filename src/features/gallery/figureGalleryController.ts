@@ -1,63 +1,64 @@
 import { config } from "../../../package.json";
-import { ZoteroMainTab } from "../../platform/zotero/mainTab";
 import { getString } from "../../utils/locale";
 
-const MENU_ID = `${config.addonRef}-open-gallery`;
-const TAB_TYPE = `${config.addonRef}-gallery`;
+const BUTTON_ID = `${config.addonRef}-open-gallery`;
+const WINDOW_NAME = `${config.addonRef}-gallery`;
 
 export class FigureGalleryController {
-  private readonly tab: ZoteroMainTab;
   private started = false;
-  private readonly attachmentWindows = new Map<number, Window>();
+  private readonly galleryWindows = new Map<number | "library", Window>();
 
-  constructor(private readonly window: Window) {
-    this.tab = new ZoteroMainTab(window, {
-      contentURL: `chrome://${config.addonRef}/content/gallery/index.html?v=${Date.now()}`,
-      iconName: `${config.addonRef}-gallery`,
-      iconURL: `chrome://${config.addonRef}/content/icons/favicon.png`,
-      title: getString("gallery-title"),
-      type: TAB_TYPE,
-    });
-  }
+  constructor(private readonly window: Window) {}
 
   public start(): void {
     if (this.started) return;
+    const document = this.window.document;
+    const toolbar = document.getElementById("zotero-items-toolbar");
+    if (!toolbar) return;
+    const button = document.createXULElement("toolbarbutton");
+    button.id = BUTTON_ID;
+    button.setAttribute("class", "zotero-tb-button");
+    button.setAttribute("tooltiptext", getString("gallery-menu-open"));
+    button.setAttribute("aria-label", getString("gallery-menu-open"));
+    button.setAttribute("tabindex", "0");
+    button.setAttribute(
+      "style",
+      `width: 28px; height: 28px; background-image: url("chrome://${config.addonRef}/content/icons/favicon.png"); background-size: 16px 16px; background-position: center; background-repeat: no-repeat;`,
+    );
+    button.addEventListener("command", () => this.open());
+    toolbar.insertBefore(button, toolbar.querySelector("spacer"));
     this.started = true;
-    const popup = this.window.document.querySelector(
-      "#menu_ToolsPopup",
-    ) as XUL.MenuPopup | null;
-    if (!popup) return;
-    ztoolkit.Menu.register(popup, {
-      commandListener: () => this.open(),
-      icon: `chrome://${config.addonRef}/content/icons/favicon.png`,
-      id: MENU_ID,
-      label: getString("gallery-menu-open"),
-      tag: "menuitem",
-    });
   }
 
   public open(): void {
-    this.tab.open();
+    this.openWindow();
   }
 
   public openAttachment(attachment: Zotero.Item): void {
-    const existing = this.attachmentWindows.get(attachment.id);
+    this.openWindow(attachment);
+  }
+
+  private openWindow(attachment?: Zotero.Item): void {
+    const key = attachment?.id ?? "library";
+    const existing = this.galleryWindows.get(key);
     if (existing && !existing.closed) {
       existing.maximize();
       existing.focus();
       return;
     }
-    const documentID = attachment.parentItemID || attachment.id;
-    const uri = `chrome://${config.addonRef}/content/gallery/index.html?libraryID=${attachment.libraryID}&documentID=${documentID}&v=${Date.now()}`;
+    const filter = attachment
+      ? `libraryID=${attachment.libraryID}&documentID=${attachment.parentItemID || attachment.id}&`
+      : "";
+    const uri = `chrome://${config.addonRef}/content/gallery/index.html?${filter}toolbar=collapsed&v=${Date.now()}`;
     // Native select popups need a content browser hosted by a chrome window.
     const window = this.window.openDialog(
       "chrome://zotero/content/standalone/basicViewer.xhtml",
-      `${TAB_TYPE}-${attachment.id}`,
+      `${WINDOW_NAME}-${key}`,
       "chrome,dialog=no,resizable,centerscreen,width=1200,height=800",
       { wrappedJSObject: { uri } },
     );
     if (!window) throw new Error("Unable to open PDF Figure Library");
-    this.attachmentWindows.set(attachment.id, window);
+    this.galleryWindows.set(key, window);
     window.addEventListener(
       "load",
       () => {
@@ -71,8 +72,8 @@ export class FigureGalleryController {
         window.addEventListener(
           "unload",
           () => {
-            if (this.attachmentWindows.get(attachment.id) === window)
-              this.attachmentWindows.delete(attachment.id);
+            if (this.galleryWindows.get(key) === window)
+              this.galleryWindows.delete(key);
           },
           { once: true },
         );
@@ -82,12 +83,11 @@ export class FigureGalleryController {
   }
 
   public dispose(): void {
-    this.window.document.getElementById(MENU_ID)?.remove();
-    this.tab.dispose();
-    for (const window of this.attachmentWindows.values()) {
+    this.window.document.getElementById(BUTTON_ID)?.remove();
+    for (const window of this.galleryWindows.values()) {
       if (!window.closed) window.close();
     }
-    this.attachmentWindows.clear();
+    this.galleryWindows.clear();
     this.started = false;
   }
 }

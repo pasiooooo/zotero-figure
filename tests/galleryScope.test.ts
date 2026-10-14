@@ -6,7 +6,6 @@ import { transformSync } from "esbuild";
 import {
   buildGalleryFacetState,
   filterGalleryEntries,
-  formatGalleryOptionLabel,
 } from "../src/features/gallery/galleryFilters";
 import {
   reconcileFigureGalleryComparisonLayout,
@@ -29,7 +28,6 @@ test("sidebar Library preselects the document once while keeping every library e
       "function appendCardsToGalleryColumns(",
     ],
     ["function toggleLayoutMode(", "function updateLayoutModeControl("],
-    ["function populateEntryFilters(", "function scheduleFilterUpdate("],
     ["function applyFilters(", "function renderResults("],
     ["function resetFilters(", "function toggleToolbar("],
   ]
@@ -64,7 +62,7 @@ test("sidebar Library preselects the document once while keeping every library e
     let layoutWrites = 0;
     let viewWrites = 0;
     const galleryApi = {
-      loadLibrary: async () => ({ entries, libraryID: 7 }),
+      loadLibrary: async () => ({ collections: [], entries, libraryID: 7 }),
       getComparisonLayout: () => saved,
       setComparisonLayout: () => layoutWrites++,
       setViewMode: () => viewWrites++,
@@ -72,6 +70,7 @@ test("sidebar Library preselects the document once while keeping every library e
     const context = {
       initialFilter: scoped ? { documentID: 10, libraryID: 7 } : undefined,
       allEntries: [] as FigureGalleryEntry[],
+      allCollections: [],
       filteredEntries: [] as FigureGalleryEntry[],
       filteredEntryIDs: new Set(),
       selectionAnchorID: undefined,
@@ -82,13 +81,38 @@ test("sidebar Library preselects the document once while keeping every library e
       committedLibraryID: undefined,
       comparisonLayout: undefined as FigureGalleryComparisonLayout | undefined,
       filterLabels: undefined,
+      filterPanel: {
+        values: {
+          collectionID: "",
+          documentID: "",
+          keyword: "",
+          kind: "",
+          year: "",
+        },
+        render(state: {
+          filters: {
+            collectionID: string;
+            documentID: string;
+            keyword: string;
+            kind: string;
+            year: string;
+          };
+        }) {
+          this.values = { ...state.filters };
+        },
+        reset() {
+          this.values = {
+            collectionID: "",
+            documentID: "",
+            keyword: "",
+            kind: "",
+            year: "",
+          };
+        },
+      },
       viewMode: "waterfall",
       document: { createElement: () => ({ value: "", textContent: "" }) },
       elements: {
-        documentFilter: new FakeSelect(),
-        collectionFilter: new FakeSelect(),
-        typeFilter: new FakeSelect(),
-        yearFilter: new FakeSelect(),
         keywordFilter: { value: "" },
       },
       window: { clearTimeout() {} },
@@ -97,9 +121,8 @@ test("sidebar Library preselects the document once while keeping every library e
       GalleryLibraryLoadCoordinator,
       buildGalleryFacetState,
       filterGalleryEntries,
-      formatGalleryOptionLabel,
       reconcileFigureGalleryComparisonLayout,
-      buildEntryFilterLabels: async () => ({
+      buildGalleryFilterLabels: async () => ({
         allLabels: [
           "All documents",
           "All categories",
@@ -137,41 +160,33 @@ test("sidebar Library preselects the document once while keeping every library e
       Array.from(context.allEntries, ({ id }) => id),
       entries.map(({ id }) => id),
     );
-    assert.equal(context.elements.documentFilter.value, scoped ? "10" : "");
+    assert.equal(context.filterPanel.values.documentID, scoped ? "10" : "");
     assert.equal(context.filteredEntries.length, scoped ? 3 : 4);
-    assert.deepEqual(
-      context.elements.documentFilter.items.map(({ value }) => value),
-      ["", "10", "11"],
-    );
-    assert.deepEqual(
-      new Set(context.elements.typeFilter.items.map(({ value }) => value)),
-      new Set(["", "figure", "table", "formula"]),
-    );
     assert.equal(context.initialFilter, undefined);
     api.persistComparisonLayout();
     api.toggleLayoutMode();
     assert.equal(layoutWrites, 2);
     assert.equal(viewWrites, 1);
-    context.elements.typeFilter.value = "table";
+    context.filterPanel.values.kind = "table";
     api.applyFilters();
     assert.deepEqual(
       context.filteredEntries.map(({ id }) => id),
       ["other-pdf"],
     );
-    context.elements.typeFilter.value = "";
-    context.elements.documentFilter.value = "11";
+    context.filterPanel.values.kind = "";
+    context.filterPanel.values.documentID = "11";
     api.applyFilters();
     assert.deepEqual(
       context.filteredEntries.map(({ id }) => id),
       ["other-document"],
     );
     await loader.load(7);
-    assert.equal(context.elements.documentFilter.value, "11");
+    assert.equal(context.filterPanel.values.documentID, "11");
     api.resetFilters();
-    assert.equal(context.elements.documentFilter.value, "");
+    assert.equal(context.filterPanel.values.documentID, "");
     assert.equal(context.filteredEntries.length, entries.length);
     await loader.load(7);
-    assert.equal(context.elements.documentFilter.value, "");
+    assert.equal(context.filterPanel.values.documentID, "");
     assert.equal(JSON.stringify(saved), originalSaved);
     assert.equal(entries.length, 4);
   }
@@ -280,6 +295,22 @@ test("opens maximized attachment windows, reuses an open window and closes them 
     assert.equal(closed, 3);
     for (const callback of scheduled) callback();
     assert.equal(maximized, 3);
+    scheduled.length = 0;
+    controller.open();
+    assert.equal(opened.length, 4);
+    assert.match(opened[3].uri, /toolbar=collapsed/);
+    assert.doesNotMatch(opened[3].uri, /documentID|libraryID/);
+    opened[3].events.get("load")!();
+    scheduled.shift()!();
+    controller.open();
+    assert.equal(opened.length, 4);
+    assert.equal(maximized, 5);
+    assert.equal(focused, 3);
+    opened[3].window.close();
+    controller.open();
+    assert.equal(opened.length, 5);
+    controller.dispose();
+    assert.equal(closed, 5);
   } finally {
     globals.addon = previousAddon;
   }
@@ -301,7 +332,13 @@ test("sidebar startup retains the main Library view mode and defaults only its t
       ),
     { loader: "ts" },
   ).code;
-  for (const fromSidebar of [true, false]) {
+  for (const search of [
+    "?documentID=10&libraryID=7",
+    "?toolbar=collapsed",
+    "",
+  ]) {
+    const fromSidebar = search.includes("documentID");
+    const collapsed = search !== "";
     const classes = new Set<string>();
     const attributes = new Map<string, string>([["aria-expanded", "true"]]);
     const loaded: number[] = [];
@@ -333,8 +370,9 @@ test("sidebar startup retains the main Library view mode and defaults only its t
       libraryLoader: undefined,
       unsubscribeFormulaLatex: undefined,
       window: {
-        location: { search: fromSidebar ? "?documentID=10&libraryID=7" : "" },
+        location: { search },
       },
+      URLSearchParams,
       getGalleryInitialFilter,
       collectElements: () => elements,
       resolveGalleryApi: () => ({
@@ -351,6 +389,7 @@ test("sidebar startup retains the main Library view mode and defaults only its t
         loaded.push(libraryID);
       },
       getLocalization: () => undefined,
+      filterPanel: { close() {} },
       closeScalePopover() {},
       bindControls() {},
       installGalleryResizeObserver() {},
@@ -373,29 +412,11 @@ test("sidebar startup retains the main Library view mode and defaults only its t
     await api.initialize();
     assert.equal(context.viewMode, "document-columns");
     assert.deepEqual(loaded, [fromSidebar ? 7 : 1]);
-    assert.equal(classes.has("is-collapsed"), fromSidebar);
-    assert.equal(attributes.get("aria-expanded"), String(!fromSidebar));
+    assert.equal(classes.has("is-collapsed"), collapsed);
+    assert.equal(attributes.get("aria-expanded"), String(!collapsed));
     assert.equal(focusCalls, 0);
     api.toggleToolbar();
-    assert.equal(classes.has("is-collapsed"), !fromSidebar);
-    assert.equal(attributes.get("aria-expanded"), String(fromSidebar));
+    assert.equal(classes.has("is-collapsed"), !collapsed);
+    assert.equal(attributes.get("aria-expanded"), String(collapsed));
   }
 });
-
-class FakeSelect {
-  value = "";
-  items: Array<{ value: string; textContent: string }> = [];
-  get options() {
-    return {
-      length: this.items.length,
-      item: (index: number) => this.items[index],
-    };
-  }
-  replaceChildren() {
-    this.items = [];
-    this.value = "";
-  }
-  append(option: { value: string; textContent: string }) {
-    this.items.push(option);
-  }
-}

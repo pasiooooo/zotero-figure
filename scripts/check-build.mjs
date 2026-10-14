@@ -33,7 +33,7 @@ const requiredInputs = [
   "src/features/reader/figureReaderController.ts",
   "src/platform/zotero/pdfTranslate.ts",
   "src/platform/zotero/figureGallery.ts",
-  "src/platform/zotero/mainTab.ts",
+  "src/platform/zotero/reader.ts",
   "src/platform/zotero/annotations.ts",
   "src/platform/zotero/attachmentFile.ts",
   "src/services/figureOutputService.ts",

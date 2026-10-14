@@ -2,7 +2,7 @@ preferences-section-interface = Interfaccia
 preferences-interface-reader-title = Barra laterale del lettore PDF
 preferences-interface-reader-description = Apri un PDF, espandi la barra laterale sinistra e seleziona l'icona PDF Figure (pasiooooo) per mostrare la barra laterale del plugin.
 preferences-interface-gallery-title = Libreria PDF Figure (pasiooooo)
-preferences-interface-gallery-description = Scegli Strumenti → Libreria PDF Figure (pasiooooo) dalla barra dei menu oppure usa il pulsante a destra.
+preferences-interface-gallery-description = Fai clic sull’icona della Libreria PDF Figure nella barra degli strumenti della finestra principale oppure usa il pulsante a destra.
 preferences-interface-gallery-open =
     .label = Apri Libreria PDF Figure (pasiooooo)
 preferences-section-model = Modello
@@ -41,3 +41,7 @@ preferences-about-github = 🔍 GitHub del manutentore del fork
 preferences-about-upstream = Progetto originale: MuiseDestiny / Zotero Figure
 preferences-about-bilibili = 📺 Bilibili dell'autore originale
 preferences-about-pro-plugins = 🎊 Plugin Pro dell'autore originale
+
+preferences-auto-analyze-new-pdfs =
+    .label = Analizza automaticamente i nuovi PDF
+preferences-auto-analyze-new-pdfs-description = Disattivato per impostazione predefinita. Elabora uno alla volta i nuovi PDF disponibili in locale, saltando quelli già analizzati. Disattivando l’opzione, le attività automatiche vengono annullate e la coda svuotata. Sincronizzazione delle annotazioni e riconoscimento automatico delle formule seguono le impostazioni dedicate.

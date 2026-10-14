@@ -19,35 +19,56 @@
   <body>
     <header id="filter-toolbar" class="gallery-toolbar">
       <div id="gallery-filter-controls" class="gallery-filters">
-        <label class="gallery-field gallery-field-document">
-          <span data-l10n-id="gallery-filter-document">Document</span>
-          <select id="document-filter"></select>
-        </label>
-        <label class="gallery-field gallery-field-year">
-          <span data-l10n-id="gallery-filter-year">Year</span>
-          <select id="year-filter"></select>
-        </label>
-        <label class="gallery-field gallery-field-collection">
-          <span data-l10n-id="gallery-filter-collection">Collection</span>
-          <select id="collection-filter"></select>
-        </label>
-        <label class="gallery-field gallery-field-type">
-          <span data-l10n-id="gallery-filter-type">Type</span>
-          <select id="type-filter">
-            <option value="" data-l10n-id="gallery-filter-all-types">
-              All types
-            </option>
-            <option value="figure" data-l10n-id="gallery-kind-figure">
-              Figure
-            </option>
-            <option value="table" data-l10n-id="gallery-kind-table">
-              Table
-            </option>
-            <option value="formula" data-l10n-id="gallery-kind-formula">
-              Formula
-            </option>
-          </select>
-        </label>
+        <div class="gallery-field gallery-field-collection">
+          <span id="collection-label" data-l10n-id="gallery-filter-collection"
+            >Collection</span
+          >
+          <button
+            id="collection-filter"
+            class="gallery-filter-trigger"
+            type="button"
+            aria-describedby="collection-label"
+            aria-expanded="false"
+            aria-controls="browse-panel"
+            aria-haspopup="dialog"
+          >
+            All collections
+          </button>
+        </div>
+        <div class="gallery-field gallery-field-document">
+          <span id="document-label" data-l10n-id="gallery-filter-document"
+            >Document</span
+          >
+          <button
+            id="document-filter"
+            class="gallery-filter-trigger"
+            type="button"
+            aria-describedby="document-label"
+            aria-expanded="false"
+            aria-controls="browse-panel"
+            aria-haspopup="dialog"
+          >
+            All documents
+          </button>
+        </div>
+        <div class="gallery-field gallery-field-year">
+          <span id="year-label" data-l10n-id="gallery-filter-year">Year</span>
+          <button
+            id="year-filter"
+            class="gallery-filter-trigger"
+            type="button"
+            aria-describedby="year-label"
+            aria-expanded="false"
+            aria-controls="year-panel"
+            aria-haspopup="dialog"
+          >
+            All years
+          </button>
+        </div>
+        <div class="gallery-field gallery-field-type">
+          <span id="type-label" data-l10n-id="gallery-filter-type">Type</span>
+          <div id="type-filter" role="group" aria-labelledby="type-label"></div>
+        </div>
         <label class="gallery-field gallery-field-search">
           <span data-l10n-id="gallery-filter-keyword">Caption keyword</span>
           <input
@@ -100,20 +121,28 @@
             role="dialog"
             aria-labelledby="gallery-scale-label"
           >
-            <label class="gallery-scale-label" for="gallery-scale-range">
+            <label class="gallery-scale-label" for="gallery-scale-value">
               <span id="gallery-scale-label" data-l10n-id="gallery-scale-label">
                 Image size
               </span>
-              <output id="gallery-scale-value" for="gallery-scale-range">
-                100%
-              </output>
+              <span
+                ><input
+                  id="gallery-scale-value"
+                  type="number"
+                  min="10"
+                  max="1000"
+                  step="1"
+                  value="100"
+                  aria-labelledby="gallery-scale-label"
+                />%</span
+              >
             </label>
             <input
               id="gallery-scale-range"
               type="range"
-              min="50"
-              max="200"
-              step="10"
+              min="10"
+              max="1000"
+              step="1"
               value="100"
               data-l10n-id="gallery-scale-range"
             />
@@ -187,6 +216,118 @@
           </svg>
         </button>
       </div>
+      <section
+        id="browse-panel"
+        class="gallery-filter-popover"
+        role="dialog"
+        aria-labelledby="browse-title"
+        hidden
+      >
+        <h2 id="browse-title" data-l10n-id="gallery-browse-title">
+          Collections &amp; documents
+        </h2>
+        <div class="gallery-browse-columns">
+          <section
+            class="gallery-collection-pane"
+            aria-labelledby="collection-heading"
+          >
+            <h3
+              id="collection-heading"
+              data-l10n-id="gallery-filter-collection"
+            >
+              Collection
+            </h3>
+            <p
+              class="gallery-filter-hint"
+              data-l10n-id="gallery-collection-descendants"
+            >
+              Includes subcollections
+            </p>
+            <div
+              id="collection-list"
+              class="gallery-filter-list"
+              tabindex="-1"
+            ></div>
+          </section>
+          <section
+            class="gallery-document-pane"
+            aria-labelledby="document-heading"
+          >
+            <h3 id="document-heading" data-l10n-id="gallery-filter-document">
+              Document
+            </h3>
+            <input
+              id="document-search"
+              type="search"
+              autocomplete="off"
+              data-l10n-id="gallery-document-search"
+              aria-controls="document-list"
+            />
+            <div
+              id="document-list"
+              class="gallery-filter-list"
+              aria-live="polite"
+            ></div>
+          </section>
+        </div>
+      </section>
+      <section
+        id="year-panel"
+        class="gallery-filter-popover gallery-year-panel"
+        role="dialog"
+        aria-labelledby="year-panel-title"
+        hidden
+      >
+        <div class="gallery-year-heading">
+          <h2 id="year-panel-title" data-l10n-id="gallery-filter-year">Year</h2>
+          <output id="year-hover" aria-live="polite"></output>
+        </div>
+        <p
+          id="year-histogram-label"
+          class="gallery-filter-hint"
+          data-l10n-id="gallery-year-histogram"
+        >
+          Results per year · click a bar to filter
+        </p>
+        <div
+          id="year-histogram"
+          role="group"
+          aria-labelledby="year-histogram-label"
+        ></div>
+        <div id="year-axis" class="gallery-year-axis" aria-hidden="true">
+          <span id="year-first"></span><span id="year-last"></span>
+        </div>
+        <label
+          class="gallery-year-label"
+          for="year-input"
+          data-l10n-id="gallery-year-input-label"
+          >Year or range</label
+        >
+        <div class="gallery-year-entry">
+          <input
+            id="year-input"
+            type="text"
+            placeholder="2020–2024"
+            autocomplete="off"
+            aria-describedby="year-error"
+          />
+          <button
+            id="year-apply"
+            type="button"
+            data-l10n-id="gallery-year-apply"
+          >
+            Apply
+          </button>
+          <button
+            id="year-clear"
+            type="button"
+            data-l10n-id="gallery-filter-all-years"
+          >
+            All years
+          </button>
+        </div>
+        <p id="year-error" role="alert" hidden></p>
+      </section>
     </header>
 
     <main>

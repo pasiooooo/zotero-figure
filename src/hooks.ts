@@ -5,6 +5,7 @@ import {
 } from "./features/preferences/preferenceScript";
 import { FigureGalleryController } from "./features/gallery/figureGalleryController";
 import { FigureBatchController } from "./features/library/figureBatchController";
+import { AutoAnalysisController } from "./features/library/autoAnalysisController";
 import { FigureReaderController } from "./features/reader/figureReaderController";
 import { registerApplicationShutdownTask } from "./platform/zotero/applicationShutdown";
 import { LayoutAnalyzer } from "./services/layout/layoutAnalyzer";
@@ -40,7 +41,12 @@ async function onStartup(): Promise<void> {
   unregisterShutdownFlush = registerApplicationShutdownTask(
     flushComparisonLayouts,
   );
-  const { batchController, formulaLatex, galleryIndex } = ensureServices();
+  const {
+    autoAnalysisController,
+    batchController,
+    formulaLatex,
+    galleryIndex,
+  } = ensureServices();
   addon.api.gallery = {
     getBootstrap: () => galleryIndex.getBootstrap(),
     getComparisonLayout: (libraryID: number) =>
@@ -72,6 +78,7 @@ async function onStartup(): Promise<void> {
       ),
   };
   batchController.start();
+  autoAnalysisController.start();
   await onMainWindowLoad(window);
 }
 
@@ -108,6 +115,7 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 
 async function onShutdown(): Promise<void> {
   const initialized = services;
+  initialized?.autoAnalysisController.dispose();
   initialized?.batchController.dispose();
   for (const controller of [...controllers.values()].reverse()) {
     controller.dispose();
@@ -156,10 +164,10 @@ function openFigureGallery(): void {
   const controller = galleryControllers.get(mainWindow);
   if (!controller) return;
   controller.open();
-  mainWindow.focus();
 }
 
 interface HookServices {
+  autoAnalysisController: AutoAnalysisController;
   batchController: FigureBatchController;
   formulaLatex: FormulaLatexCoordinator;
   galleryIndex: FigureGalleryIndex;
@@ -173,12 +181,21 @@ function ensureServices(): HookServices {
   const galleryIndex = new FigureGalleryIndex(resultStore);
   const layoutAnalyzer = new LayoutAnalyzer(resultStore);
   const formulaLatex = new FormulaLatexCoordinator(resultStore);
+  const autoAnalysisController = new AutoAnalysisController(
+    layoutAnalyzer,
+    async (attachment, signal) => {
+      for (const controller of controllers.values())
+        controller.reloadResults(attachment.id);
+      await formulaLatex.recognizeAttachment(attachment, signal);
+    },
+  );
   const batchController = new FigureBatchController(
     layoutAnalyzer,
     resultStore,
     formulaLatex,
   );
   services = {
+    autoAnalysisController,
     batchController,
     formulaLatex,
     galleryIndex,

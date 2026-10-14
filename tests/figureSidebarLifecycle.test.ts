@@ -150,13 +150,24 @@ test("double-clicking populated, translated or empty captions edits the current 
 });
 
 test("caption edits reorder existing cards and selection order without replacing their nodes", () => {
-  const panel = createPanel(async () => createPreview());
+  let opened = 0;
+  const panel = createPanel(async () => createPreview(), {
+    reader: {
+      toggleSidebar: (open: boolean) => {
+        assert.equal(open, true);
+        opened++;
+      },
+    } as unknown as PdfReader,
+  });
   const state = panel as unknown as {
     results: StoredFigureResult[];
     resultCards: Map<string, HTMLElement>;
     panel: HTMLElement;
     imageLoads: { updateResult(): void };
     refreshControls(): void;
+    openPanel(): void;
+    scheduleResultScroll(id: string): void;
+    selectedResultIDs: Set<string>;
     applyUpdatedResult(result: StoredFigureResult): void;
   };
   const first = { ...createResult("first"), comment: "Fig 1.1" };
@@ -165,6 +176,8 @@ test("caption edits reorder existing cards and selection order without replacing
   const card = () =>
     ({
       querySelector: () => null,
+      classList: { toggle() {} },
+      setAttribute() {},
       ownerDocument: {},
     }) as unknown as HTMLElement;
   const firstCard = card();
@@ -181,7 +194,15 @@ test("caption edits reorder existing cards and selection order without replacing
   } as unknown as HTMLElement;
   state.imageLoads = { updateResult() {} };
   state.refreshControls = () => {};
-  state.applyUpdatedResult({ ...first, comment: "Fig 2.1" });
+  state.openPanel = () => {};
+  let focused: string | undefined;
+  state.scheduleResultScroll = (id) => {
+    focused = id;
+  };
+  panel.updateResult({ ...first, comment: "Fig 2.1" }, true);
+  assert.equal(opened, 1);
+  assert.equal(focused, first.id);
+  assert.deepEqual([...state.selectedResultIDs], [first.id]);
   assert.deepEqual([...state.resultCards.keys()], ["second", "first"]);
   assert.deepEqual(appended, [secondCard, firstCard]);
   state.applyUpdatedResult({ ...first, comment: "" });
@@ -314,7 +335,7 @@ test("copies during recognition and still applies concurrent external LaTeX", as
 
   const rerecognize = internals.rerecognizeFormulaLatex(anchor, source);
   const copy = internals.copyFormulaLatex(anchor, source);
-  panel.updateFormulaLatex(manual);
+  panel.updateResult(manual);
 
   assert.equal(copyCalls, 1);
   assert.equal(applied[0], manual);
@@ -337,7 +358,7 @@ test("reloads after a formula update races the initial result snapshot", () => {
   internals.reloadAfterLoad = false;
   internals.results = undefined;
 
-  panel.updateFormulaLatex({
+  panel.updateResult({
     ...createResult("formula"),
     kind: "formula",
     latex: "x",
@@ -383,7 +404,7 @@ test("does not apply a stale copy result after a newer formula update", async ()
 
   const request = internals.copyFormulaLatex(anchor, source);
   await waitFor(() => timers.length === 1);
-  panel.updateFormulaLatex(manual);
+  panel.updateResult(manual);
   timers[0]();
   await request;
 
@@ -1042,6 +1063,128 @@ test("native sidebar batch menu opens after the context event and cancels stale 
   }
 });
 
+test("region results are selected in sidebar order and hidden types are made visible", () => {
+  const panel = createPanel(async () => createPreview());
+  const state = panel as unknown as {
+    pendingRevealRegions?: Array<{
+      pageIndex: number;
+      rect: [number, number, number, number];
+    }>;
+    filters: Set<StoredFigureResult["kind"]>;
+    selectedResultIDs: Set<string>;
+    selectionAnchorID?: string;
+    prepareResultReveal(results: StoredFigureResult[]): string | undefined;
+  };
+  const later = { ...createResult("later"), comment: "Fig 2" };
+  const first = {
+    ...createResult("first"),
+    comment: "Fig 1",
+    rect: [-1, -1, 2, 2],
+    detectedRect: [0.1, 0.1, 0.9, 0.9],
+  } as StoredFigureResult;
+  const formula = { ...createResult("formula"), kind: "formula" as const };
+  const elsewhere = { ...createResult("elsewhere"), pageIndex: 1 };
+  const outside = {
+    ...createResult("outside"),
+    rect: [2, 2, 3, 3],
+  } as StoredFigureResult;
+  state.filters = new Set(["table"]);
+  state.selectedResultIDs.add("elsewhere");
+  state.pendingRevealRegions = [{ pageIndex: 0, rect: [0, 0, 1, 1] }];
+  assert.equal(
+    state.prepareResultReveal([later, formula, elsewhere, first, outside]),
+    "formula",
+  );
+  assert.deepEqual([...state.selectedResultIDs], ["formula", "first", "later"]);
+  assert.deepEqual([...state.filters], ["table", "formula", "figure"]);
+  assert.equal(state.selectionAnchorID, "formula");
+  assert.equal(state.pendingRevealRegions, undefined);
+  state.pendingRevealRegions = [{ pageIndex: 9, rect: [0, 0, 1, 1] }];
+  assert.equal(state.prepareResultReveal([first]), undefined);
+  assert.deepEqual([...state.selectedResultIDs], ["formula", "first", "later"]);
+  assert.equal(state.prepareResultReveal([later]), undefined);
+});
+
+test("manual recognition waits for a fresh reload before opening, scrolling and focusing the result", async () => {
+  const stale = createDeferred<StoredFigureResult[]>();
+  const fresh = createDeferred<StoredFigureResult[]>();
+  const result = createResult("recognized");
+  let loads = 0;
+  let opened = 0;
+  let focused = 0;
+  const scrolls: unknown[] = [];
+  const scheduled: Array<() => void> = [];
+  const panel = createPanel(async () => createPreview(), {
+    getResults: () =>
+      ++loads === 1
+        ? stale.promise
+        : loads === 2
+          ? fresh.promise
+          : Promise.resolve([result]),
+    reader: {
+      setSidebarOpen: (open: boolean) => {
+        assert.equal(open, true);
+        opened++;
+      },
+    } as PdfReader,
+    ownerWindow: {
+      setTimeout: (callback: () => void) => {
+        scheduled.push(callback);
+        return scheduled.length;
+      },
+      clearTimeout() {},
+    } as unknown as Window,
+  });
+  const state = panel as unknown as {
+    panelContent: HTMLDivElement;
+    results: StoredFigureResult[];
+    resultCards: Map<string, HTMLElement>;
+    selectedResultIDs: Set<string>;
+    scrollContainer: HTMLElement;
+    loadingResults: boolean;
+    renderContent(): void;
+    openPanel(): void;
+  };
+  state.panelContent = {
+    querySelector: () => ({ getBoundingClientRect: () => ({ height: 30 }) }),
+  } as unknown as HTMLDivElement;
+  state.scrollContainer = {
+    isConnected: true,
+    scrollTop: 200,
+    getBoundingClientRect: () => ({ top: 50 }),
+    scrollTo: (options: unknown) => scrolls.push(options),
+  } as unknown as HTMLElement;
+  state.renderContent = () => {
+    state.resultCards.clear();
+    for (const { id } of state.results)
+      state.resultCards.set(id, {
+        isConnected: true,
+        getBoundingClientRect: () => ({ top: 500 }),
+        focus: () => focused++,
+      } as unknown as HTMLElement);
+  };
+  let activated = 0;
+  state.openPanel = () => activated++;
+  panel.reloadResults();
+  panel.reloadResults([{ pageIndex: 0, rect: [0, 0, 1, 1] }]);
+  stale.resolve([createResult("stale")]);
+  await waitFor(() => loads === 2);
+  assert.equal(opened, 0);
+  assert.equal(scheduled.length, 0);
+  fresh.resolve([result]);
+  await waitFor(() => !state.loadingResults);
+  assert.equal(opened, 1);
+  assert.equal(activated, 1);
+  assert.deepEqual([...state.selectedResultIDs], ["recognized"]);
+  scheduled.shift()!();
+  assert.deepEqual(scrolls, [{ behavior: "smooth", top: 614 }]);
+  assert.equal(focused, 1);
+  panel.reloadResults();
+  await waitFor(() => !state.loadingResults);
+  assert.equal(opened, 1);
+  assert.equal(scheduled.length, 0);
+});
+
 function createPanel(
   onPrepareCorrection: FigureSidebarPanelOptions["onPrepareCorrection"],
   overrides: Partial<FigureSidebarPanelOptions> = {},
@@ -1055,6 +1198,7 @@ function createPanel(
     onAnalyze: () => {},
     onOpenGallery: () => {},
     onSelectRegion: () => {},
+    onCorrectCaption: () => {},
     onRecognizeRegion: async () => {},
     onCacheTranslations: async () => new Map(),
     onCancelAnalysis: () => {},

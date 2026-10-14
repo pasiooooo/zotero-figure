@@ -69,6 +69,7 @@ class ModelPreferencesController {
   private readonly getApiKeyButton: Element;
   private readonly openGalleryButton: Element;
   private readonly syncAnnotations: Element & { checked: boolean };
+  private readonly autoAnalyzeNewPdfs: Element & { checked: boolean };
   private installController?: AbortController;
   private readonly revealButton: Element;
   private refreshToken = 0;
@@ -105,6 +106,7 @@ class ModelPreferencesController {
     this.getApiKeyButton = requireElement(doc, "#get-siliconflow-api-key");
     this.openGalleryButton = requireElement(doc, "#open-figure-gallery");
     this.syncAnnotations = requireElement(doc, "#sync-annotations");
+    this.autoAnalyzeNewPdfs = requireElement(doc, "#auto-analyze-new-pdfs");
     this.revealButton = requireElement(doc, "#reveal-model");
     this.restoreButton = requireElement(doc, "#restore-model");
     this.status = requireElement(doc, "#model-status");
@@ -157,6 +159,9 @@ class ModelPreferencesController {
     this.syncAnnotations.addEventListener("command", () => {
       setPref("syncAnnotations", this.syncAnnotations.checked);
     });
+    this.autoAnalyzeNewPdfs.addEventListener("command", () => {
+      setPref("autoAnalyzeNewPdfs", this.autoAnalyzeNewPdfs.checked);
+    });
     this.window.addEventListener(
       "unload",
       () => {
@@ -170,6 +175,7 @@ class ModelPreferencesController {
       { once: true },
     );
     this.syncAnnotations.checked = getPref("syncAnnotations") === true;
+    this.autoAnalyzeNewPdfs.checked = getPref("autoAnalyzeNewPdfs") === true;
     this.apiKeyInput.value = getPref("siliconFlowApiKey") ?? "";
     this.autoRecognizeFormula.checked =
       getPref("autoRecognizeFormula") === true;

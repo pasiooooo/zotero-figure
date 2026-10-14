@@ -186,7 +186,7 @@ test("reports a post-index failure with the loaded snapshot", async () => {
 });
 
 function snapshot(id: string): FigureGallerySnapshot {
-  return { entries: [], generatedAt: id, libraryID: 1 };
+  return { collections: [], entries: [], generatedAt: id, libraryID: 1 };
 }
 
 function createDeferred<T>(): {

@@ -511,6 +511,52 @@ test("does not republish unchanged formula snapshots when recognition is disable
   assert.deepEqual(published, []);
 });
 
+test("automatic attachment recognition awaits each formula and respects cancellation", async () => {
+  const targets = Array.from({ length: 500 }, (_, index) =>
+    formula(String(index), index),
+  );
+  const coordinator = new FormulaLatexCoordinator(
+    {
+      list: async () => targets,
+      listIndexedAttachmentKeys: async () => [],
+      readFormulaLatexState: async () => undefined,
+      readFormulaRecognitionInput: async () => undefined,
+      updateFormulaLatex: async () => undefined,
+    },
+    { isAutoRecognitionEnabled: () => true, platform: emptyPlatform() },
+  );
+  const calls: string[] = [];
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  coordinator.recognize = async (_item, result) => {
+    calls.push(result.id);
+    await blocked;
+    return result;
+  };
+  const controller = new AbortController();
+  const pending = coordinator.recognizeAttachment(
+    attachment(1, "AUTO"),
+    controller.signal,
+  );
+  try {
+    await waitFor(() => calls.length > 0);
+    assert.deepEqual(calls, ["0"]);
+    controller.abort();
+    release();
+    await pending;
+    assert.deepEqual(calls, ["0"]);
+    calls.length = 0;
+    await coordinator.recognizeAttachment(attachment(1, "AUTO"));
+    assert.equal(calls.length, 500);
+  } finally {
+    release();
+    coordinator.dispose();
+    await pending;
+  }
+});
+
 function attachment(libraryID: number, key: string): Zotero.Item {
   return {
     isPDFAttachment: () => true,

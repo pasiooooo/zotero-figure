@@ -6,6 +6,12 @@ export interface FigureGalleryLibrary {
   name: string;
 }
 
+export interface FigureGalleryCollection {
+  id: number;
+  name: string;
+  parentID: number | null;
+}
+
 export interface FigureGalleryEntry {
   attachmentID: number;
   collectionIDs: number[];
@@ -25,6 +31,7 @@ export interface FigureGalleryEntry {
 }
 
 export interface FigureGallerySnapshot {
+  collections: FigureGalleryCollection[];
   entries: FigureGalleryEntry[];
   generatedAt: string;
   libraryID: number;
@@ -175,8 +182,12 @@ export function reconcileFigureGalleryComparisonLayout(
   const documentOrder = [
     ...(stored?.documentOrder ?? []).filter((id) => availableDocuments.has(id)),
   ];
+  const orderedDocuments = new Set(documentOrder);
   for (const documentID of documentIDs) {
-    if (!documentOrder.includes(documentID)) documentOrder.push(documentID);
+    if (!orderedDocuments.has(documentID)) {
+      documentOrder.push(documentID);
+      orderedDocuments.add(documentID);
+    }
   }
 
   const assignedEntries = new Set<string>();
@@ -219,38 +230,54 @@ export function reconcileFigureGalleryComparisonLayout(
   }
 
   const unassignedByDocument = new Map<number, FigureGalleryEntry[]>();
-  for (const documentID of documentOrder) {
-    unassignedByDocument.set(
-      documentID,
-      entries.filter(
-        (entry) =>
-          entry.documentItemID === documentID && !assignedEntries.has(entry.id),
-      ),
-    );
+  for (const entry of entries) {
+    if (assignedEntries.has(entry.id)) continue;
+    const items = unassignedByDocument.get(entry.documentItemID) ?? [];
+    items.push(entry);
+    unassignedByDocument.set(entry.documentItemID, items);
   }
 
   const appendedRowCount = Math.max(
     0,
     ...[...unassignedByDocument.values()].map((items) => items.length),
   );
+  const appendedRows: FigureGalleryComparisonRow[] = [];
+  const retainedRowIDs = new Set(rows.map(({ id }) => id));
+  let suffix = 1;
   for (let index = 0; index < appendedRowCount; index++) {
-    const row = createFigureGalleryComparisonRow(rows);
-    for (const documentID of documentOrder) {
-      const entry = unassignedByDocument.get(documentID)?.[index];
-      if (entry) {
-        row.entries[String(documentID)] = createFigureGalleryComparisonCell(
-          entry.id,
-        );
-      }
-    }
-    rows.push(row);
+    while (retainedRowIDs.has(`comparison-row-${suffix}`)) suffix++;
+    const id = `comparison-row-${suffix++}`;
+    appendedRows.push({ entries: {}, id, isGroup: false, label: "" });
   }
+  for (const [documentID, items] of unassignedByDocument) {
+    for (let index = 0; index < items.length; index++) {
+      appendedRows[index].entries[String(documentID)] =
+        createFigureGalleryComparisonCell(items[index].id);
+    }
+  }
+  rows.push(...appendedRows);
 
   return {
     documentOrder,
     rows: compactFigureGalleryComparisonRows(rows, documentOrder),
     version: FIGURE_GALLERY_COMPARISON_LAYOUT_VERSION,
   };
+}
+
+export function filterFigureGalleryComparisonLayout(
+  layout: Readonly<FigureGalleryComparisonLayout>,
+  entries: readonly FigureGalleryEntry[],
+): FigureGalleryComparisonLayout {
+  const visible = new Set(entries.map(({ id }) => id));
+  return reconcileFigureGalleryComparisonLayout(entries, {
+    ...layout,
+    // Remove fully filtered groups before compacting the surrounding ordinary rows.
+    rows: layout.rows.filter((row) =>
+      Object.values(row.entries).some((cell) =>
+        cell.entryIDs.some((id) => visible.has(id)),
+      ),
+    ),
+  });
 }
 
 export function insertFigureGalleryComparisonRow(
@@ -404,8 +431,33 @@ export function setFigureGalleryComparisonRowLabel(
   layout: Readonly<FigureGalleryComparisonLayout>,
   rowID: string,
   label: string,
+  visibleRow?: Readonly<FigureGalleryComparisonRow>,
 ): FigureGalleryComparisonLayout {
   const next = cloneFigureGalleryComparisonLayout(layout);
+  if (visibleRow && !visibleRow.isGroup && label.trim()) {
+    const group = createFigureGalleryComparisonRow(next.rows, true);
+    group.label = label.trim().slice(0, 160);
+    const index = next.rows.findIndex(({ id }) => id === rowID);
+    next.rows.splice(index < 0 ? next.rows.length : index, 0, group);
+    for (const [documentKey, cell] of Object.entries(visibleRow.entries)) {
+      group.entries[documentKey] = {
+        entryIDs: [...cell.entryIDs],
+        primaryEntryID: cell.primaryEntryID,
+      };
+      const visibleIDs = new Set(cell.entryIDs);
+      for (const source of next.rows) {
+        if (source === group) continue;
+        const sourceCell = source.entries[documentKey];
+        for (const id of [...(sourceCell?.entryIDs ?? [])])
+          if (visibleIDs.has(id))
+            removeFigureGalleryComparisonEntry(source, documentKey, id);
+      }
+    }
+    next.rows = next.rows.filter(
+      (row) => row.isGroup || Object.keys(row.entries).length > 0,
+    );
+    return next;
+  }
   const row = next.rows.find(({ id }) => id === rowID);
   if (row) {
     row.label = label.trim().slice(0, 160);
@@ -439,15 +491,14 @@ function compactFigureGalleryComparisonRows(
   const appendOrdinaryRows = (): void => {
     if (!ordinaryRows.length) return;
     const documentKeys = documentOrder.map(String);
-    const cellsByDocument = new Map(
-      documentKeys.map((documentKey) => [
-        documentKey,
-        ordinaryRows.flatMap((row) => {
-          const cell = row.entries[documentKey];
-          return cell ? [cell] : [];
-        }),
-      ]),
-    );
+    const cellsByDocument = new Map<string, FigureGalleryComparisonCell[]>();
+    for (const row of ordinaryRows) {
+      for (const [documentKey, cell] of Object.entries(row.entries)) {
+        const cells = cellsByDocument.get(documentKey) ?? [];
+        cells.push(cell);
+        cellsByDocument.set(documentKey, cells);
+      }
+    }
     const compactedRowCount = Math.max(
       0,
       ...[...cellsByDocument.values()].map((cells) => cells.length),
@@ -455,16 +506,18 @@ function compactFigureGalleryComparisonRows(
     for (let index = 0; index < compactedRowCount; index++) {
       const sourceRow = ordinaryRows[index]!;
       const entries: Record<string, FigureGalleryComparisonCell> = {};
-      for (const documentKey of documentKeys) {
-        const cell = cellsByDocument.get(documentKey)?.[index];
-        if (cell) entries[documentKey] = cell;
-      }
       compacted.push({
         entries,
         id: sourceRow.id,
         isGroup: false,
         label: "",
       });
+    }
+    const offset = compacted.length - compactedRowCount;
+    for (const documentKey of documentKeys) {
+      const cells = cellsByDocument.get(documentKey) ?? [];
+      for (let index = 0; index < cells.length; index++)
+        compacted[offset + index].entries[documentKey] = cells[index];
     }
     ordinaryRows = [];
   };

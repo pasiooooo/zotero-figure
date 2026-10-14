@@ -1,4 +1,5 @@
 import type { Rect } from "../../domain/layout";
+import { containsResultRegion } from "../../domain/resultRegion";
 import type { FigureGalleryBatchResult } from "../../domain/figureGallery";
 import { layoutPinnedCards, type Point } from "../../domain/pinnedFigureCard";
 import {
@@ -18,7 +19,10 @@ import {
 } from "../../platform/zotero/pdfTranslate";
 import { getString } from "../../utils/locale";
 import { renderLatex } from "../../utils/renderLatex";
-import type { PdfReader } from "../../platform/zotero/reader";
+import {
+  openReaderSidebar,
+  type PdfReader,
+} from "../../platform/zotero/reader";
 import { createDocumentBlobURL } from "../../platform/zotero/browserGlobals";
 import type { FormulaLatexEditSnapshot } from "../../services/formula/formulaLatexCoordinator";
 import type {
@@ -71,6 +75,7 @@ export interface FigureSidebarPanelOptions {
   onAnalyze(): void | Promise<void>;
   onOpenGallery(): void;
   onSelectRegion(): void;
+  onCorrectCaption(result: StoredFigureResult): void;
   onRecognizeRegion(result: StoredFigureResult): Promise<void>;
   onCancelAnalysis(): void;
   onCacheTranslations(
@@ -166,6 +171,10 @@ export class FigureSidebarPanel {
   private results?: readonly StoredFigureResult[];
   private loadingResults = false;
   private reloadAfterLoad = false;
+  private pendingRevealRegions?: readonly Pick<
+    StoredFigureResult,
+    "pageIndex" | "rect"
+  >[];
   private remountTimerID?: number;
   private renderRevision = 0;
   private readonly imageLoads: SidebarImageLoadCoordinator;
@@ -434,6 +443,10 @@ export class FigureSidebarPanel {
   private openPanelFromTab(event: MouseEvent): void {
     event.preventDefault();
     event.stopImmediatePropagation();
+    this.openPanel();
+  }
+
+  private openPanel(): void {
     this.active = true;
     try {
       this.setInternalSidebarView("pasiofigure");
@@ -482,10 +495,20 @@ export class FigureSidebarPanel {
     this.reloadResults();
   }
 
-  public updateFormulaLatex(result: StoredFigureResult): void {
+  public updateResult(result: StoredFigureResult, reveal = false): void {
     if (this.disposed) return;
     if (this.loadingResults) this.reloadAfterLoad = true;
     this.applyUpdatedResult(result);
+    if (reveal) {
+      openReaderSidebar(this.options.reader);
+      this.openPanel();
+      this.selectFilterResult(result.kind, result.id);
+      this.selectResult(result.id, {
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+      });
+    }
   }
 
   public refreshControls(): void {
@@ -530,8 +553,12 @@ export class FigureSidebarPanel {
     }
   }
 
-  public reloadResults(): void {
-    if (this.disposed || !this.panelContent) return;
+  public reloadResults(
+    regionsToReveal?: readonly Pick<StoredFigureResult, "pageIndex" | "rect">[],
+  ): void {
+    if (this.disposed) return;
+    if (regionsToReveal?.length) this.pendingRevealRegions = regionsToReveal;
+    if (!this.panelContent) return;
     this.requestResults(this.panelContent, true);
   }
 
@@ -564,6 +591,7 @@ export class FigureSidebarPanel {
   }
 
   private detachDocument(): void {
+    this.pendingRevealRegions = undefined;
     this.selectedResultIDs.clear();
     this.selectionAnchorID = undefined;
     this.batchStatus = undefined;
@@ -739,7 +767,15 @@ export class FigureSidebarPanel {
       const results = await this.options.getResults();
       if (this.disposed || revision !== this.renderRevision) return;
       this.results = results;
+      const resultToReveal = this.reloadAfterLoad
+        ? undefined
+        : this.prepareResultReveal(results);
       this.renderContent(panelContent, results);
+      if (resultToReveal) {
+        openReaderSidebar(this.options.reader);
+        this.openPanel();
+        this.scheduleResultScroll(resultToReveal);
+      }
       this.options.onResultsDisplayed(results);
     } catch (error) {
       if (this.disposed || revision !== this.renderRevision) return;
@@ -765,6 +801,39 @@ export class FigureSidebarPanel {
         }
       }
     }
+  }
+
+  private prepareResultReveal(
+    results: readonly StoredFigureResult[],
+  ): string | undefined {
+    const regions = this.pendingRevealRegions;
+    this.pendingRevealRegions = undefined;
+    if (!regions) return;
+    const matches = filterAndSortFigureSidebarItems(
+      results.filter((result) =>
+        regions.some(
+          (region) =>
+            region.pageIndex === result.pageIndex &&
+            containsResultRegion(
+              region.rect,
+              result.detectedRect ?? result.rect,
+            ),
+        ),
+      ),
+      new Set(),
+      (result) => result,
+    );
+    if (!matches.length) return;
+    if (this.filters.size) {
+      this.filters = new Set([
+        ...this.filters,
+        ...matches.map(({ kind }) => kind),
+      ]);
+    }
+    this.selectedResultIDs.clear();
+    for (const { id } of matches) this.selectedResultIDs.add(id);
+    this.selectionAnchorID = matches[0].id;
+    return this.selectionAnchorID;
   }
 
   private renderContent(
@@ -2307,6 +2376,12 @@ export class FigureSidebarPanel {
         this.openRegionEditor(result),
       );
       if (!this.options.isAnalyzing()) {
+        this.appendMenuItem(menu, "sidebar-correct-caption", () => {
+          this.closeMenu();
+          this.options.ownerWindow.setTimeout(() => {
+            if (!this.disposed) this.options.onCorrectCaption(result);
+          }, 0);
+        });
         this.appendMenuItem(menu, "sidebar-recognize-region", () =>
           this.options.onRecognizeRegion(result),
         );

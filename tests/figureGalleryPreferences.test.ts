@@ -88,10 +88,14 @@ test("persists the gallery mode in preferences and layouts in the data directory
     assert.equal(getFigureGalleryImageScale(), 100);
     setFigureGalleryImageScale(135);
     assert.equal(getFigureGalleryImageScale(), 135);
-    setFigureGalleryImageScale(999);
-    assert.equal(getFigureGalleryImageScale(), 200);
+    setFigureGalleryImageScale(137);
+    assert.equal(getFigureGalleryImageScale(), 137);
+    setFigureGalleryImageScale(Number.NaN);
+    assert.equal(getFigureGalleryImageScale(), 100);
+    setFigureGalleryImageScale(2000);
+    assert.equal(getFigureGalleryImageScale(), 1000);
     setFigureGalleryImageScale(1);
-    assert.equal(getFigureGalleryImageScale(), 50);
+    assert.equal(getFigureGalleryImageScale(), 10);
   } finally {
     await flushComparisonLayouts();
     harness.restore();

@@ -3,8 +3,8 @@
     "zotero-figure@pasiooooo.github.io": {
       "updates": [
         {
-          "version": "1.1.1",
-          "update_link": "https://github.com/pasiooooo/zotero-figure/releases/download/v1.1.1/zotero-figure.xpi",
+          "version": "1.1.2",
+          "update_link": "https://github.com/pasiooooo/zotero-figure/releases/download/v1.1.2/zotero-figure.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "9.0",

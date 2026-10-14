@@ -255,3 +255,21 @@ prompt-figure-caption = Подпись рисунка:
 
 sidebar-pin-floating = Закрепить плавающее изображение
 sidebar-unpin-floating = Открепить (после этого нажмите Esc в любом месте для закрытия)
+
+gallery-browse-title = Коллекции и документы
+gallery-collection-descendants = Включая вложенные коллекции
+gallery-document-search =
+    .placeholder = Поиск документов в коллекции
+    .aria-label = Поиск документов в коллекции
+gallery-document-empty = Нет подходящих документов
+gallery-year-histogram = Результаты по годам · нажмите на столбец
+gallery-year-input-label = Год или диапазон
+gallery-year-apply = Применить
+gallery-year-invalid = Введите четырёхзначный год или диапазон, например 2020–2024 (начало ≤ конец).
+
+sidebar-correct-caption = Исправить подпись
+caption-selection-hint = Выделите правильную подпись. После отпускания кнопки текст PDF будет прочитан локально и заменит подпись. Esc или правая кнопка мыши — отмена.
+caption-selection-no-text = В выделенной области нет доступного текста PDF. Исходная подпись сохранена. Для сканов без текстового слоя нужен OCR; платные сервисы не использовались. Текст можно ввести через «Изменить подпись».
+caption-selection-result-missing = Результат больше не существует. Подпись не сохранена.
+progress-correct-caption = Локальное чтение выделенной подписи…
+progress-correct-caption-done = Подпись исправлена по выделенному тексту PDF.

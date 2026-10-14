@@ -246,3 +246,21 @@ prompt-figure-caption = 图注释：
 
 sidebar-pin-floating = 固定悬浮图片
 sidebar-unpin-floating = 取消固定（之后可在任意位置按 Esc 关闭）
+
+gallery-browse-title = 集合与文献
+gallery-collection-descendants = 包含子集合中的文献
+gallery-document-search =
+    .placeholder = 检索此集合中的文献
+    .aria-label = 检索此集合中的文献
+gallery-document-empty = 没有匹配的文献
+gallery-year-histogram = 每年结果数 · 点击柱形筛选年份
+gallery-year-input-label = 年份或年份范围
+gallery-year-apply = 应用
+gallery-year-invalid = 请输入四位年份或范围，例如 2020–2024（起始年份不能晚于结束年份）。
+
+sidebar-correct-caption = 纠正图注
+caption-selection-hint = 框选正确的图注，松开后从 PDF 文本层本地提取并替换这条结果的图注。Esc 或右键取消。
+caption-selection-no-text = 选区内没有可读取的 PDF 文字，已保留原图注。无文本层的扫描页需要 OCR；本次未调用任何付费服务。您也可以通过“修改图注”手动输入。
+caption-selection-result-missing = 这条结果已不存在，未保存图注。
+progress-correct-caption = 正在本地提取选区图注…
+progress-correct-caption-done = 已用选区文字纠正图注。

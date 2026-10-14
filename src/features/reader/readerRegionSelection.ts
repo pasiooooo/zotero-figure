@@ -20,6 +20,7 @@ export function startReaderRegionSelection(
   reader: PdfReader,
   onSelect: (region: ReaderRegionSelection) => void,
   onClose: () => void,
+  labels?: { title: string; hint: string },
 ): () => void {
   const internal = reader._internalReader;
   const view = internal?._lastView ?? internal?._primaryView;
@@ -50,7 +51,10 @@ export function startReaderRegionSelection(
   overlay.tabIndex = -1;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
-  overlay.setAttribute("aria-label", getString("sidebar-select-region"));
+  overlay.setAttribute(
+    "aria-label",
+    labels?.title ?? getString("sidebar-select-region"),
+  );
   overlay.style.cssText = `position:fixed;left:${frameBounds.left}px;top:${frameBounds.top}px;width:${frameBounds.width}px;height:${frameBounds.height}px;z-index:2147483647;cursor:crosshair;touch-action:none;user-select:none;background:rgba(0,0,0,.28);outline:none;overflow:hidden;`;
   const selection = document.createElement("div");
   selection.style.cssText =
@@ -59,7 +63,7 @@ export function startReaderRegionSelection(
   hint.style.cssText =
     "position:absolute;top:12px;left:50%;transform:translateX(-50%);max-width:90%;box-sizing:border-box;padding:10px 14px;border-radius:8px;background:#20242b;color:#fff;font:13px/1.5 sans-serif;cursor:default;display:flex;align-items:center;gap:12px;";
   const label = document.createElement("span");
-  label.textContent = getString("region-selection-hint");
+  label.textContent = labels?.hint ?? getString("region-selection-hint");
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.textContent = getString("sidebar-correct-region-cancel");

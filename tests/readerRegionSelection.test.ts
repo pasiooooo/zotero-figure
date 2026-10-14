@@ -36,6 +36,7 @@ class Element extends Target {
   style: Record<string, string> = {};
   removed = false;
   focused = false;
+  textContent = "";
   append(...children: Element[]) {
     this.children.push(...children);
   }
@@ -50,7 +51,11 @@ class Element extends Target {
   }
 }
 
-function harness(rotated = false, frameScale = 1) {
+function harness(
+  rotated = false,
+  frameScale = 1,
+  labels?: { title: string; hint: string },
+) {
   const globals = globalThis as typeof globalThis & { addon: typeof addon };
   const previousAddon = globals.addon;
   globals.addon = { data: {} } as typeof addon;
@@ -123,6 +128,7 @@ function harness(rotated = false, frameScale = 1) {
     reader,
     (region) => results.push(region),
     () => closed++,
+    labels,
   );
   const overlay = body.children[0];
   const pointer = (type: string, x: number, y: number) =>
@@ -227,3 +233,22 @@ for (const action of [
     }
   });
 }
+
+test("caption selection uses its own instructions and the same cancellable crop tool", () => {
+  const h = harness(false, 1, {
+    title: "Correct Caption",
+    hint: "Select only the caption; processed locally",
+  });
+  try {
+    assert.equal(
+      h.overlay.children[1].children[0].textContent,
+      "Select only the caption; processed locally",
+    );
+    h.pointer("pointerdown", 60, 100);
+    h.pointer("pointerup", 140, 220);
+    assert.equal(h.results.length, 1);
+    assert.equal(h.closed(), 1);
+  } finally {
+    h.restore();
+  }
+});

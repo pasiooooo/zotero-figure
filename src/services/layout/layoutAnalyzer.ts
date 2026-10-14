@@ -3,6 +3,7 @@ import type { DuplicateMode } from "../../domain/figureResults";
 import { containsResultRegion } from "../../domain/resultRegion";
 import {
   buildAnnotationCandidates,
+  extractTextInRect,
   pageMayContainFigures,
   type AnnotationCandidate,
   type PageLayoutData,
@@ -61,6 +62,7 @@ export interface AnalysisOptions {
   annotationReader?: PdfReader;
   duplicateMode?: DuplicateMode;
   signal?: AbortSignal;
+  skipIfAnalyzed?: boolean;
   syncAnnotations?: boolean;
 }
 
@@ -304,6 +306,42 @@ export class LayoutAnalyzer {
     }
   }
 
+  public async extractRegionText(
+    attachment: Zotero.Item,
+    pageIndex: number,
+    rect: Rect,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (this.disposed) throw new OperationCancelledError();
+    throwIfAborted(signal);
+    if (
+      !Number.isInteger(pageIndex) ||
+      pageIndex < 0 ||
+      rect.length !== 4 ||
+      !rect.every(Number.isFinite) ||
+      rect[2] <= rect[0] ||
+      rect[3] <= rect[1]
+    ) {
+      throw new Error("Invalid caption selection");
+    }
+    const releaseDocument = await this.openPdfDocuments.acquire(signal);
+    let document: PdfAnalysisDocument | undefined;
+    try {
+      document = await this.pdfEngine.open(attachment, signal);
+      if (pageIndex >= document.pageCount)
+        throw new Error("Invalid caption page");
+      const page = await document.getPageData(pageIndex, signal);
+      throwIfAborted(signal);
+      return extractTextInRect(page.chars, rect);
+    } finally {
+      try {
+        await document?.close();
+      } finally {
+        releaseDocument();
+      }
+    }
+  }
+
   public async correctResultRegion(
     attachment: Zotero.Item,
     result: StoredFigureResult,
@@ -395,6 +433,13 @@ export class LayoutAnalyzer {
     const { signal } = options;
     const syncAnnotations = options.syncAnnotations === true;
     throwIfAborted(signal);
+    // Check under the attachment lease so manual analysis cannot race this check.
+    if (
+      options.skipIfAnalyzed &&
+      (await this.resultStore.hasAnalysis(attachment, signal))
+    ) {
+      return summary;
+    }
     const modelPreparation = measureAsync(() =>
       modelManager.ensureRecommendedModel({ signal }),
     );

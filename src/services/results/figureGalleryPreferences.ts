@@ -10,8 +10,8 @@ import {
 } from "./figureGalleryComparisonStore";
 
 export const FIGURE_GALLERY_IMAGE_SCALE_DEFAULT = 100;
-export const FIGURE_GALLERY_IMAGE_SCALE_MIN = 50;
-export const FIGURE_GALLERY_IMAGE_SCALE_MAX = 200;
+export const FIGURE_GALLERY_IMAGE_SCALE_MIN = 10;
+export const FIGURE_GALLERY_IMAGE_SCALE_MAX = 1000;
 
 export function getFigureGalleryImageScale(): number {
   return normalizeImageScale(getPref("galleryImageScale"));
@@ -49,7 +49,7 @@ export function setFigureGalleryComparisonLayout(
   });
 }
 
-function normalizeImageScale(value: unknown): number {
+export function normalizeImageScale(value: unknown): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return FIGURE_GALLERY_IMAGE_SCALE_DEFAULT;
   return Math.min(

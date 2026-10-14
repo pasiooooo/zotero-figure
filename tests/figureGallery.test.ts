@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import test from "node:test";
 import {
   dissolveFigureGalleryComparisonRow,
+  filterFigureGalleryComparisonLayout,
   findShortestFigureGalleryColumn,
   getFigureGalleryColumnCount,
   getFigureGalleryImageAspectRatio,
@@ -20,6 +21,113 @@ import {
 import type { FigureGalleryPlatform } from "../src/platform/zotero/figureGallery";
 import { FigureGalleryIndex } from "../src/services/results/figureGalleryIndex";
 import type { StoredFigureResult } from "../src/services/results/figureResultStore";
+
+test("type filtering repacks each document without changing the saved comparison layout", () => {
+  const entries = [
+    { ...comparisonEntry("a-table", 1, 0), kind: "table" as const },
+    comparisonEntry("a-1", 1, 1),
+    { ...comparisonEntry("a-equation", 1, 2), kind: "formula" as const },
+    comparisonEntry("a-2", 1, 3),
+    comparisonEntry("b-1", 2, 0),
+    { ...comparisonEntry("b-table", 2, 1), kind: "table" as const },
+    comparisonEntry("b-2", 2, 2),
+  ];
+  const layout = reconcileFigureGalleryComparisonLayout(entries);
+  const original = JSON.stringify(layout);
+  const visible = entries.filter(({ kind }) => kind === "figure");
+  const projected = filterFigureGalleryComparisonLayout(layout, visible);
+  assert.deepEqual(
+    projected.rows.map((row) =>
+      Object.values(row.entries).map((cell) => cell.entryIDs[0]),
+    ),
+    [
+      ["a-1", "b-1"],
+      ["a-2", "b-2"],
+    ],
+  );
+  assert.equal(JSON.stringify(layout), original);
+  const named = setFigureGalleryComparisonRowLabel(
+    layout,
+    projected.rows[0].id,
+    "Visible group",
+    projected.rows[0],
+  );
+  const group = named.rows.find((row) => row.label === "Visible group")!;
+  assert.deepEqual(group.entries, projected.rows[0].entries);
+  const retained = named.rows.flatMap((row) =>
+    Object.values(row.entries).flatMap((cell) => cell.entryIDs),
+  );
+  assert.deepEqual([...retained].sort(), entries.map(({ id }) => id).sort());
+  assert.equal(new Set(retained).size, entries.length);
+  assert.equal(JSON.stringify(layout), original);
+});
+
+test("filtered groups retain visible members and empty groups do not leave layout gaps", () => {
+  const entries = [
+    comparisonEntry("a", 1, 0),
+    comparisonEntry("b", 2, 0),
+    comparisonEntry("hidden", 1, 1),
+  ];
+  const layout: FigureGalleryComparisonLayout = {
+    documentOrder: [2, 1],
+    version: 3,
+    rows: [
+      {
+        id: "a-row",
+        label: "",
+        isGroup: false,
+        entries: { "1": comparisonCell("a") },
+      },
+      {
+        id: "hidden-group",
+        label: "Invisible",
+        isGroup: true,
+        entries: { "1": comparisonCell("hidden") },
+      },
+      {
+        id: "b-row",
+        label: "",
+        isGroup: false,
+        entries: { "2": comparisonCell("b") },
+      },
+    ],
+  };
+  const packed = filterFigureGalleryComparisonLayout(
+    layout,
+    entries.slice(0, 2),
+  );
+  assert.deepEqual(packed.documentOrder, [2, 1]);
+  assert.equal(packed.rows.length, 1);
+  assert.deepEqual(packed.rows[0].entries, {
+    "1": comparisonCell("a"),
+    "2": comparisonCell("b"),
+  });
+  layout.rows[0].isGroup = true;
+  layout.rows[0].label = "Keep alignment";
+  const grouped = filterFigureGalleryComparisonLayout(
+    layout,
+    entries.slice(0, 2),
+  );
+  assert.equal(grouped.rows[0].id, "a-row");
+  assert.equal(grouped.rows[0].label, "Keep alignment");
+  assert.equal(grouped.rows.length, 2);
+});
+
+test("large sparse libraries generate unique rows without losing document order or entries", () => {
+  const entries = Array.from({ length: 12000 }, (_, index) =>
+    comparisonEntry(`entry-${index}`, index % 100 === 0 ? 2 : 1, index),
+  );
+  const layout = reconcileFigureGalleryComparisonLayout(entries);
+  assert.equal(layout.rows.length, 11880);
+  assert.equal(
+    new Set(layout.rows.map(({ id }) => id)).size,
+    layout.rows.length,
+  );
+  const assigned = layout.rows.flatMap((row) =>
+    Object.values(row.entries).flatMap((cell) => cell.entryIDs),
+  );
+  assert.equal(new Set(assigned).size, entries.length);
+});
 
 test("derives a stable preview ratio from the stored crop", () => {
   assert.equal(getFigureGalleryImageAspectRatio([10, 20, 110, 70]), 2);
@@ -970,6 +1078,7 @@ test("builds a library snapshot without exposing local image paths", async () =>
     removeAnnotation: async () => undefined,
     getAttachment: async (_libraryID, key) =>
       key === "ATTACHMENT" ? attachment : false,
+    listCollections: () => [{ id: 7, name: "Methods", parentID: null }],
     getCollectionName: (id) => (id === 7 ? "Methods" : undefined),
     getDefaultLibraryID: () => 4,
     listLibraries: () => [
@@ -1032,6 +1141,7 @@ test("rejects unavailable libraries and stale result IDs", async () => {
       exportImage: async () => undefined,
       removeAnnotation: async () => undefined,
       getAttachment: async () => false,
+      listCollections: () => [{ id: 7, name: "Methods", parentID: null }],
       getCollectionName: () => undefined,
       getDefaultLibraryID: () => 1,
       listLibraries: () => [{ id: 1, name: "Library" }],
@@ -1422,6 +1532,7 @@ function galleryPlatform(
         (attachment) =>
           attachment.libraryID === libraryID && attachment.key === key,
       ) ?? false,
+    listCollections: () => [{ id: 7, name: "Methods", parentID: null }],
     getCollectionName: () => undefined,
     getDefaultLibraryID: () => 1,
     listLibraries: () => [

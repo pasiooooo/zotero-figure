@@ -99,6 +99,75 @@ const detectionResults: LayoutElement[] = [
   },
 ];
 
+test("caption crops read only selected PDF text without loading a model or rendering images", async () => {
+  const h = installAnalyzerHarness({
+    pageData: {
+      chars: [
+        { c: "Adjacent body text", rect: [5, 20, 9, 24] },
+        {
+          c: "Figure 2. Unusual layout",
+          rect: [12, 20, 75, 25],
+          lineBreakAfter: true,
+        },
+        { c: "caption", rect: [12, 12, 50, 18] },
+        { c: "Other column", rect: [82, 12, 98, 18] },
+      ],
+    },
+  });
+  const analyzer = new LayoutAnalyzer(new FigureResultStore(), h.pdfEngine, 1);
+  modelManager.ensureRecommendedModel = async () =>
+    assert.fail("Caption extraction must not load a model");
+  const open = h.pdfEngine.open;
+  let closed = 0;
+  h.pdfEngine.open = async (...args) => {
+    const doc = await open(...args);
+    return {
+      ...doc,
+      close: async () => {
+        closed++;
+        await doc.close();
+      },
+    };
+  };
+  try {
+    assert.equal(
+      await analyzer.extractRegionText(h.reader._item, 0, [10, 10, 80, 30]),
+      "Figure 2. Unusual layout caption",
+    );
+    assert.equal(
+      await analyzer.extractRegionText(h.reader._item, 0, [90, 90, 100, 100]),
+      "",
+    );
+    await assert.rejects(
+      analyzer.extractRegionText(h.reader._item, 1, [10, 10, 80, 30]),
+      /Invalid caption page/,
+    );
+    assert.equal(closed, 3);
+    await assert.rejects(
+      analyzer.extractRegionText(h.reader._item, 0, [0, 0, NaN, 10]),
+      /Invalid caption selection/,
+    );
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await assert.rejects(
+      analyzer.extractRegionText(
+        h.reader._item,
+        0,
+        [0, 0, 10, 10],
+        cancelled.signal,
+      ),
+      OperationCancelledError,
+    );
+    assert.equal(h.openedDocumentCount(), 3);
+    assert.equal(AnalyzerWorker.instances.length, 0);
+    assert.deepEqual(h.renderedPages, []);
+    assert.deepEqual(h.renderedRegionRects, []);
+  } finally {
+    analyzer.dispose();
+    h.restore();
+  }
+});
+
 test("region recognition crops before detection and bypasses full-page text hints", async () => {
   const harness = installAnalyzerHarness({
     pageText: () => "ordinary text",
@@ -710,6 +779,27 @@ for (const duplicateMode of ["replace-page", "skip-existing"] as const) {
     }
   });
 }
+
+test("automatic analysis waits for a manual attachment lease and then skips its results", async () => {
+  const harness = installAnalyzerHarness({ pageText: () => "ordinary text" });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    const manual = analyzer.analyze(harness.reader, { update() {} });
+    const automatic = analyzer.analyzeAttachment(
+      harness.reader._item,
+      { update() {} },
+      { skipIfAnalyzed: true },
+    );
+    const [, skipped] = await Promise.all([manual, automatic]);
+    assert.equal(skipped.totalPages, 0);
+    assert.equal(harness.openedDocumentCount(), 1);
+    assert.equal(await store.hasAnalysis(harness.reader._item), true);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
 
 test("explicit replacement overrides skip-existing preference and prunes obsolete results", async () => {
   const harness = installAnalyzerHarness({ duplicateMode: "skip-existing" });

@@ -1,5 +1,6 @@
 pref("__prefsPrefix__.view", "Annotation");
 pref("__prefsPrefix__.forkMigrationComplete", false);
+pref("__prefsPrefix__.autoAnalyzeNewPdfs", false);
 pref("__prefsPrefix__.autoRecognizeFormula", false);
 pref("__prefsPrefix__.duplicateMode", "replace-page");
 pref("__prefsPrefix__.galleryImageScale", 100);

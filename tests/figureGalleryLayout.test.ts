@@ -21,7 +21,10 @@ const loadCoordinator = readFileSync(
   "utf8",
 );
 const css = readFileSync("addon/chrome/content/gallery/gallery.css", "utf8");
-const tabAdapter = readFileSync("src/platform/zotero/mainTab.ts", "utf8");
+const galleryController = readFileSync(
+  "src/features/gallery/figureGalleryController.ts",
+  "utf8",
+);
 const hooks = readFileSync("src/hooks.ts", "utf8");
 
 function sourceBetween(startMarker: string, endMarker: string): string {
@@ -32,18 +35,9 @@ function sourceBetween(startMarker: string, endMarker: string): string {
   return script.slice(start, end);
 }
 
-test("opens the gallery through an isolated Zotero custom tab", () => {
-  assert.match(tabAdapter, /tabs\.add\(\{/);
-  assert.match(tabAdapter, /type: this\.options\.type/);
-  assert.match(tabAdapter, /"browser"/);
-  assert.match(tabAdapter, /type: "content"/);
-  assert.match(tabAdapter, /remote: "false"/);
-  assert.doesNotMatch(tabAdapter, /"iframe"/);
-  assert.match(tabAdapter, /tabs\.select\(tab\.id\)/);
-  assert.match(tabAdapter, /this\.window[\s\S]*Zotero_Tabs/);
-  assert.match(tabAdapter, /data: \{ icon: this\.options\.iconName \}/);
-  assert.match(tabAdapter, /data-item-type=/);
-  assert.match(tabAdapter, /this\.options\.iconURL/);
+test("opens the gallery in a native standalone window", () => {
+  assert.match(galleryController, /basicViewer.xhtml/);
+  assert.doesNotMatch(galleryController, /ZoteroMainTab|Zotero_Tabs/);
   assert.match(hooks, /new Map<Window, FigureGalleryController>/);
   assert.match(hooks, /addon\.api\.gallery = \{/);
   assert.match(hooks, /galleryController\.start\(\)/);
@@ -71,16 +65,16 @@ test("exposes all requested cross-document filters", () => {
   assert.match(filters, /entry\.collectionIDs/);
   assert.match(filters, /entry\.kind/);
   assert.match(filters, /entry\.comment, entry\.tag, entry\.documentTitle/);
-  assert.match(
-    script,
-    /select\.addEventListener\("change", scheduleFilterUpdate\)/,
-  );
-  assert.doesNotMatch(
-    script,
-    /select\.addEventListener\("input", scheduleFilterUpdate\)/,
-  );
-  assert.match(filters, /function countOptions\(/);
-  assert.match(script, /formatGalleryOptionLabel\(label, count\)/);
+  assert.doesNotMatch(markup, /<select/);
+  for (const id of [
+    "browse-panel",
+    "collection-list",
+    "document-search",
+    "year-input",
+    "year-histogram",
+  ])
+    assert.match(markup, new RegExp(`id="${id}"`));
+  assert.match(script, /new GalleryFilterPanel/);
   assert.match(script, /document\.createElement\("mark"\)/);
   assert.match(script, /setHighlightedText\(caption, entry\.comment\)/);
   assert.match(script, /kind\.append\(createKindIcon\(entry\.kind\)\)/);
@@ -98,7 +92,7 @@ test("exposes all requested cross-document filters", () => {
   assert.match(markup, /id="gallery-scale-toggle"/);
   assert.match(markup, /id="gallery-scale-popover"/);
   assert.match(markup, /id="gallery-scale-range"[^>]*type="range"/);
-  assert.match(markup, /min="50"[^>]*max="200"[^>]*step="10"/);
+  assert.match(markup, /min="10"[^>]*max="1000"[^>]*step="1"/);
   assert.match(markup, /id="reset-filters"/);
   assert.match(markup, /id="gallery-scale-control"[\s\S]*id="reset-filters"/);
   assert.match(markup, /data-l10n-id="gallery-reset-filters"/);
@@ -111,10 +105,7 @@ test("exposes all requested cross-document filters", () => {
   assert.match(script, /getImageScale\?\.\(\)/);
   assert.match(script, /setImageScale\?\.\(imageScale\)/);
   assert.match(script, /scheduleGalleryImageScalePersistence/);
-  assert.match(
-    script,
-    /const scrollAnchor = changed \? captureGalleryScrollAnchor\(\)/,
-  );
+  assert.match(script, /galleryZoomAnchor = captureGalleryScrollAnchor\(\)/);
   assert.match(script, /restoreGalleryScrollAnchor\(scrollAnchor\)/);
   assert.match(script, /viewMode === "waterfall"/);
   assert.match(
@@ -123,7 +114,7 @@ test("exposes all requested cross-document filters", () => {
   );
   assert.match(
     script,
-    /function resetFilters\(\): void \{[\s\S]*collectionFilter\.value = ""[\s\S]*documentFilter\.value = ""[\s\S]*yearFilter\.value = ""[\s\S]*typeFilter\.value = ""[\s\S]*keywordFilter\.value = ""[\s\S]*applyFilters\(\)/,
+    /function resetFilters\(\): void \{[\s\S]*filterPanel\.reset\(\)[\s\S]*keywordFilter\.value = ""[\s\S]*applyFilters\(\)/,
   );
   assert.match(script, /setAttribute\("aria-expanded", String\(!collapsed\)\)/);
   assert.match(script, /if \(collapsed\) elements\.keywordFilter\.focus\(\)/);
@@ -174,7 +165,7 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
   assert.match(script, /style\.setProperty\("display", "none", "important"\)/);
   assert.match(
     css,
-    /\.gallery-grid\.is-waterfall\s*\{[^}]*grid-template-columns:\s*repeat\(var\(--gallery-column-count, 1\), minmax\(0, 1fr\)\)/,
+    /\.gallery-grid\.is-waterfall\s*\{[^}]*grid-template-columns:\s*repeat\(\s*var\(--gallery-column-count, 1\),\s*var\(--gallery-column-width\)\s*\)/,
   );
   assert.match(css, /\.gallery-grid\s*\{[^}]*column-gap:\s*14px/);
   assert.match(
@@ -190,7 +181,7 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
     css,
     /\.gallery-toolbar\s*\{[^}]*position:\s*fixed[^}]*bottom:\s*18px[^}]*left:\s*50%/,
   );
-  assert.match(css, /width:\s*min\(calc\(100% - 36px\), 638px\)/);
+  assert.match(css, /width:\s*min\(calc\(100% - 36px\), 760px\)/);
   assert.match(css, /height:\s*126px/);
   assert.match(css, /height 220ms cubic-bezier\(0\.2, 0\.8, 0\.2, 1\)/);
   assert.match(css, /gallery-toolbar-expand-content 180ms ease-out/);
@@ -208,11 +199,11 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
   assert.doesNotMatch(css, /\.gallery-field-library|\.comparison-drag-handle/);
   assert.match(
     css,
-    /\.gallery-field-document\s*\{[^}]*grid-column:\s*7 \/ span 3[^}]*grid-row:\s*1/,
+    /\.gallery-field-document\s*\{[^}]*grid-column:\s*4 \/ span 3[^}]*grid-row:\s*1/,
   );
   assert.match(
     css,
-    /\.gallery-field-year\s*\{[^}]*grid-column:\s*4 \/ span 3[^}]*grid-row:\s*1/,
+    /\.gallery-field-year\s*\{[^}]*grid-column:\s*7 \/ span 3[^}]*grid-row:\s*1/,
   );
   assert.match(
     css,
@@ -249,7 +240,7 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
   );
   assert.match(
     css,
-    /\.gallery-toolbar\.is-collapsed\s*\{[^}]*width:\s*min\(calc\(100% - 36px\), 438px\)/,
+    /\.gallery-toolbar\.is-collapsed\s*\{[^}]*width:\s*min\(calc\(100% - 36px\), 560px\)/,
   );
   assert.doesNotMatch(css, /\.gallery-toolbar\s*\{[^}]*position:\s*sticky/);
   assert.match(script, /media\?\.classList\.add\("is-loaded"\)/);
@@ -257,7 +248,7 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
   assert.match(script, /getFigureGalleryColumnCount\(/);
   assert.match(script, /findShortestFigureGalleryColumn\(/);
   assert.match(script, /appendCardsToGalleryColumns\(nextCards\)/);
-  assert.match(script, /createComparisonDocumentHeader\(documentID\)/);
+  assert.match(script, /createComparisonDocumentHeader\(entry, count\)/);
   assert.match(
     script,
     /appendComparisonRow\(\s*row,\s*version,\s*renderedComparisonRowCount === 0 && index === 0,\s*\)/,
@@ -434,8 +425,8 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
     /\.gallery-card\.is-comparison:hover\s*\{[^}]*translate:\s*none/,
   );
   assert.match(
-    script,
-    /"--comparison-thumbnail-size",[\s\S]*COMPARISON_THUMBNAIL_MAX_SIZE[\s\S]*COMPARISON_THUMBNAIL_MIN_SIZE,[\s\S]*documentWidth \/ 5/,
+    css,
+    /--comparison-thumbnail-size:\s*clamp\(\s*44px,\s*calc\(var\(--comparison-document-width\) \/ 5\),\s*72px\s*\)/,
   );
   assert.match(
     script,
@@ -479,7 +470,7 @@ test("bounds rendering and lazy image work while revoking blob URLs", () => {
   assert.match(script, /committedLibraryID === libraryID/);
   assert.match(filters, /function buildFacetOptions\(/);
   assert.match(script, /buildGalleryFacetState\(/);
-  assert.match(script, /state\.totals\.years/);
+  assert.match(script, /filterPanel\.render\(facets, labels, allCollections\)/);
   assert.match(
     script,
     /if \(committedLibraryID === libraryID\)[\s\S]*applyFilters\(\)/,

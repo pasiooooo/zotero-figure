@@ -1,4 +1,7 @@
-import type { FigureGalleryLibrary } from "../../domain/figureGallery";
+import type {
+  FigureGalleryCollection,
+  FigureGalleryLibrary,
+} from "../../domain/figureGallery";
 import type { Rect } from "../../domain/layout";
 import type { FigureResultRecord } from "../../domain/figureResults";
 import { getString } from "../../utils/locale";
@@ -11,6 +14,7 @@ export interface FigureGalleryPlatform {
   getCollectionName(collectionID: number): string | undefined;
   getDefaultLibraryID(): number;
   listLibraries(): FigureGalleryLibrary[];
+  listCollections(libraryID: number): FigureGalleryCollection[];
   logError(error: Error): void;
   openPdf(attachmentID: number, pageIndex: number, rect: Rect): Promise<void>;
   readFile(path: string): Promise<Uint8Array>;
@@ -57,6 +61,14 @@ export function createZoteroFigureGalleryPlatform(): FigureGalleryPlatform {
       Zotero.Libraries.getAll()
         .filter(({ libraryType }) => libraryType !== "feed")
         .map(({ libraryID, name }) => ({ id: libraryID, name })),
+    listCollections: (libraryID) =>
+      Zotero.Collections.getByLibrary(libraryID, true).map(
+        ({ id, name, parentID }) => ({
+          id,
+          name,
+          parentID: parentID || null,
+        }),
+      ),
     logError: (error) => Zotero.logError(error),
     openPdf: async (attachmentID, pageIndex, rect) => {
       await Zotero.Reader.open(

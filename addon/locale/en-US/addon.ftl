@@ -249,3 +249,21 @@ prompt-figure-caption = Figure caption:
 
 sidebar-pin-floating = Keep this image floating
 sidebar-unpin-floating = Unpin this image (then press Esc anywhere to close)
+
+gallery-browse-title = Collections & documents
+gallery-collection-descendants = Includes subcollections
+gallery-document-search =
+    .placeholder = Search documents in this collection
+    .aria-label = Search documents in this collection
+gallery-document-empty = No matching documents
+gallery-year-histogram = Results per year · click a bar to filter
+gallery-year-input-label = Year or range
+gallery-year-apply = Apply
+gallery-year-invalid = Enter a four-digit year or a range such as 2020–2024 (start ≤ end).
+
+sidebar-correct-caption = Correct Caption
+caption-selection-hint = Drag around the correct caption; release to read its PDF text locally and replace this result’s caption. Esc or right-click cancels.
+caption-selection-no-text = No readable PDF text was found in this region. The original caption is unchanged. Scanned pages without a text layer need OCR; no paid service was called. You can use Edit caption to enter the text manually.
+caption-selection-result-missing = This result no longer exists. No caption was saved.
+progress-correct-caption = Reading the selected caption locally…
+progress-correct-caption-done = Caption corrected from the selected PDF text.

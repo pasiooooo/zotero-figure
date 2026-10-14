@@ -113,6 +113,7 @@ export class FigureGalleryIndex {
     const indexedResults = groups.flat().sort(compareFigureGalleryEntries);
     return {
       snapshot: {
+        collections: this.platform.listCollections(libraryID),
         entries: indexedResults.map(({ entry }) => entry),
         generatedAt: new Date().toISOString(),
         libraryID,

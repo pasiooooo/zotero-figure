@@ -3,6 +3,9 @@ import test from "node:test";
 import type { FigureGalleryEntry } from "../src/domain/figureGallery";
 import {
   buildGalleryFacetState,
+  buildGalleryCollectionTree,
+  buildGalleryYearHistogram,
+  parseGalleryYearRange,
   buildGalleryFilterOptions,
   filterGalleryEntries,
   formatGalleryOptionLabel,
@@ -130,9 +133,159 @@ test("recomputes each facet from the other active filters", () => {
     { ...state.filters, year: "2023" },
     labels,
   );
-  assert.equal(incompatible.filters.collectionID, "");
-  assert.equal(incompatible.filters.year, "");
-  assert.equal(filterGalleryEntries(entries, incompatible.filters).length, 3);
+  assert.equal(incompatible.filters.collectionID, "11");
+  assert.equal(incompatible.filters.year, "2023");
+  assert.equal(filterGalleryEntries(entries, incompatible.filters).length, 0);
+});
+
+test("year ranges include both boundaries, exclude unknown years and reject invalid input", () => {
+  const filters = {
+    collectionID: "",
+    documentID: "",
+    kind: "",
+    keyword: "",
+    year: "2023–2024",
+  };
+  const source = [
+    ...entries,
+    galleryEntry({
+      documentItemID: 3,
+      documentTitle: "Undated",
+      id: "unknown",
+      kind: "figure",
+    }),
+  ];
+  assert.equal(filterGalleryEntries(source, filters).length, 3);
+  assert.equal(
+    filterGalleryEntries(source, { ...filters, year: "2024" }).length,
+    2,
+  );
+  assert.equal(
+    filterGalleryEntries(source, { ...filters, year: "" }).length,
+    4,
+  );
+  for (const value of [
+    "2024-2020",
+    "24",
+    "2020-",
+    "oops",
+    "0000",
+    "2020-2024-2025",
+  ]) {
+    assert.equal(parseGalleryYearRange(value), undefined, value);
+    assert.equal(
+      filterGalleryEntries(source, { ...filters, year: value }).length,
+      0,
+    );
+  }
+  for (const value of ["2020–2024", "2020-2024", "2020 — 2024", " 2020至2024 "])
+    assert.deepEqual(parseGalleryYearRange(value), [2020, 2024]);
+});
+
+test("histogram limits itself to the requested years and fills empty years with zero", () => {
+  const options = [
+    ["2024", "2024", 3],
+    ["2021", "2021", 5],
+  ] as const;
+  assert.deepEqual(buildGalleryYearHistogram(options, "2022–2024"), [
+    { year: 2022, count: 0 },
+    { year: 2023, count: 0 },
+    { year: 2024, count: 3 },
+  ]);
+  assert.deepEqual(buildGalleryYearHistogram(options, "2021"), [
+    { year: 2021, count: 5 },
+  ]);
+  assert.deepEqual(buildGalleryYearHistogram(options, "2025–2026"), [
+    { year: 2025, count: 0 },
+    { year: 2026, count: 0 },
+  ]);
+  assert.deepEqual(buildGalleryYearHistogram([], "2024"), [
+    { year: 2024, count: 0 },
+  ]);
+  assert.deepEqual(buildGalleryYearHistogram([], ""), []);
+  assert.deepEqual(buildGalleryYearHistogram(options, "2024–2020"), []);
+  assert.deepEqual(
+    buildGalleryYearHistogram(options, "").map(({ year }) => year),
+    [2021, 2022, 2023, 2024],
+  );
+});
+
+test("collection hierarchy includes descendants, deduplicates counts, preserves empty collections and sorts siblings", () => {
+  const collections = [
+    { id: 1, name: "Research", parentID: null },
+    { id: 11, name: "Beta", parentID: 1 },
+    { id: 10, name: "Alpha", parentID: 1 },
+    { id: 12, name: "Nested", parentID: 10 },
+    { id: 20, name: "Empty", parentID: null },
+  ];
+  const filters = {
+    collectionID: "1",
+    documentID: "",
+    kind: "",
+    keyword: "",
+    year: "",
+  };
+  const labels = { figure: "Figure", table: "Table", formula: "Formula" };
+  const source = [
+    ...entries,
+    galleryEntry({
+      id: "nested",
+      documentItemID: 3,
+      documentTitle: "Nested",
+      kind: "figure",
+      collectionIDs: [12],
+      collectionNames: ["Nested"],
+    }),
+  ];
+  const state = buildGalleryFacetState(source, filters, labels, collections);
+  assert.equal(
+    filterGalleryEntries(source, state.filters, collections).length,
+    4,
+  );
+  assert.deepEqual(
+    state.collections.find(([id]) => id === "1"),
+    ["1", "Research", 4],
+  );
+  assert.deepEqual(
+    buildGalleryCollectionTree(collections).map(({ id, depth }) => [id, depth]),
+    [
+      [20, 0],
+      [1, 0],
+      [10, 1],
+      [12, 2],
+      [11, 1],
+    ],
+  );
+  const empty = buildGalleryFacetState(
+    source,
+    { ...filters, collectionID: "20" },
+    labels,
+    collections,
+  );
+  assert.equal(empty.filters.collectionID, "20");
+  assert.equal(
+    filterGalleryEntries(source, empty.filters, collections).length,
+    0,
+  );
+  // A current document does not hide the other branches in the browser.
+  const selected = buildGalleryFacetState(
+    source,
+    { ...filters, documentID: "3" },
+    labels,
+    collections,
+  );
+  assert.deepEqual(selected.collections, state.collections);
+  assert.equal(selected.documents.length, 3);
+});
+
+test("collection tree tolerates missing parents and cycles without hiding collections", () => {
+  const tree = buildGalleryCollectionTree([
+    { id: 1, name: "A", parentID: 2 },
+    { id: 2, name: "B", parentID: 1 },
+    { id: 3, name: "C", parentID: 99 },
+  ]);
+  assert.equal(tree.length, 3);
+  assert.equal(new Set(tree.map(({ id }) => id)).size, 3);
 });
 
 function galleryEntry(

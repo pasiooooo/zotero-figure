@@ -80,6 +80,16 @@ export function charsToText(chars: readonly PdfCharacter[]): string {
   return text.join("");
 }
 
+export function extractTextInRect(
+  chars: readonly PdfCharacter[],
+  rect: Rect,
+  padding = 0,
+): string {
+  return charsToText(
+    chars.filter((char) => isCharacterCenteredInRect(char, rect, padding)),
+  ).trim();
+}
+
 export function pageMayContainFigures(chars: readonly PdfCharacter[]): boolean {
   const pageText = charsToText(chars).toLocaleLowerCase();
   // Image-only and failed-text-extraction pages must still reach the model.
@@ -226,15 +236,16 @@ function collectTextRegions(
         page.width,
         page.height,
       );
-      const chars = page.chars.filter((char) =>
-        isCharacterCenteredInRect(char, [
+      const text = extractTextInRect(
+        page.chars,
+        [
           left + page.viewBox[0],
           bottom + page.viewBox[1],
           right + page.viewBox[0],
           top + page.viewBox[1],
-        ]),
+        ],
+        CAPTION_PADDING,
       );
-      const text = charsToText(chars);
       return {
         bottom,
         left,
@@ -326,15 +337,19 @@ function unionRects(first: Rect, second: Caption | Rect): Rect {
   ];
 }
 
-function isCharacterCenteredInRect(char: PdfCharacter, rect: Rect): boolean {
+function isCharacterCenteredInRect(
+  char: PdfCharacter,
+  rect: Rect,
+  padding: number,
+): boolean {
   const [left, bottom, right, top] = rect;
   const centerX = (char.rect[0] + char.rect[2]) / 2;
   const centerY = (char.rect[1] + char.rect[3]) / 2;
   return (
-    centerX >= left - CAPTION_PADDING &&
-    centerX <= right + CAPTION_PADDING &&
-    centerY >= bottom - CAPTION_PADDING &&
-    centerY <= top + CAPTION_PADDING
+    centerX >= left - padding &&
+    centerX <= right + padding &&
+    centerY >= bottom - padding &&
+    centerY <= top + padding
   );
 }
 

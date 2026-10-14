@@ -5,6 +5,19 @@ analysis without an open Reader. PDF work runs in one MuPDF WASM worker, and
 inference runs in two ONNX workers with one inference thread each. Every stage
 has an explicit bound.
 
+## Automatic imports
+
+Automatic analysis is off by default. A single plugin-wide observer queues only
+new PDF attachment IDs and retry counters. Notifications share one two-second
+startup timer; one drain awaits each PDF and its enabled formula recognition
+before starting another. No per-import model, PDF worker, image buffer, or
+promise fan-out is created. Missing local files retry at ten-second intervals
+(up to 30 attempts); failed files leave the queue. Completed IDs are removed.
+Disabling the preference or unloading cancels the active job, clears pending
+IDs and timers, and unregisters observers on unload. Existing analysis is checked
+under the attachment lease before preparing models or reading PDF bytes.
+Background and manual work share the limits below.
+
 ## Pipeline limits
 
 | Resource                     | Limit | Purpose                                                           |
@@ -85,3 +98,20 @@ With ONNX Runtime Web `1.22.0-dev.20250409-89f8206ba4`, WASM, and one thread,
 the output-pruned model averaged 2,302.84 ms/page versus 2,390.47 ms/page for
 the prior model across 15 pages from five PDFs, a 3.67% reduction. Every value
 in all 15 `output0` tensors and every final NMS detection was exactly equal.
+
+## Library comparison rendering
+
+Comparison rows retain lightweight cells for horizontal scrolling, but cards and
+KaTeX content are created only within 320 px of the viewport. A frame creates at
+most 12 cards and stops after approximately 8 ms (one expensive card can exceed
+that budget). Filters and window disposal cancel queued cell work. Formula
+updates patch only the currently rendered matching card. Document counts use a
+single pass; initial row IDs and sparse ordinary-row compaction avoid repeated
+full-array scans. Filtering projects and repacks visible ordinary rows without
+writing the projection back to the saved layout. Explicit groups remain aligned.
+
+A browser fixture with 100 documents and 6,000 results created 2,000 cards and
+666 KaTeX nodes on initial comparison display before this change. At the same
+1280 × 720 viewport the updated view created 20 cards and six KaTeX nodes; the
+2,000 lightweight grid cells remain for alignment and horizontal navigation.
+This measures deferred DOM work, not real-Zotero wall time or peak memory.
