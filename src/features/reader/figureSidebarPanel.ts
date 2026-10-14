@@ -43,10 +43,10 @@ import {
 import { SidebarImageLoadCoordinator } from "./sidebarImageLoadCoordinator";
 import { SidebarResultEditorController } from "./sidebarResultEditorController";
 
-const PANEL_ID = "zoterofigure-sidebar-panel";
-const TAB_ID = "zoterofigure-sidebar-tab";
-const STYLE_ID = "zoterofigure-sidebar-style";
-const FILTER_POPOVER_ID = "zoterofigure-filter-results";
+const PANEL_ID = "pasiofigure-sidebar-panel";
+const TAB_ID = "pasiofigure-sidebar-tab";
+const STYLE_ID = "pasiofigure-sidebar-style";
+const FILTER_POPOVER_ID = "pasiofigure-filter-results";
 const FILTER_POPOVER_CLOSE_DELAY_MS = 140;
 const PINNED_CARD_Z_INDEX_BASE = 2_000_000_000;
 
@@ -272,12 +272,12 @@ export class FigureSidebarPanel {
       this.batchBusy ||
       !this.panel?.contains(target) ||
       target?.closest(
-        'input, textarea, select, [contenteditable="true"], .zoterofigure-sidebar-controls',
+        'input, textarea, select, [contenteditable="true"], .pasiofigure-sidebar-controls',
       )
     )
       return;
     const clickedCard = target?.closest<HTMLElement>(
-      ".zoterofigure-sidebar-card",
+      ".pasiofigure-sidebar-card",
     );
     const id =
       clickedCard?.dataset.resultId ??
@@ -295,7 +295,7 @@ export class FigureSidebarPanel {
       });
     card.focus({ preventScroll: true });
     const anchor = card.querySelector<HTMLButtonElement>(
-      ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+      ".pasiofigure-card-menu:not(.pasiofigure-card-pin)",
     );
     if (anchor) this.openMenu(anchor, result, event);
   };
@@ -436,7 +436,7 @@ export class FigureSidebarPanel {
     event.stopImmediatePropagation();
     this.active = true;
     try {
-      this.setInternalSidebarView("zoterofigure");
+      this.setInternalSidebarView("pasiofigure");
     } catch (error) {
       // Zotero may reject unknown private sidebar view names. The injected
       // wrapper can still be shown directly when that happens.
@@ -496,7 +496,7 @@ export class FigureSidebarPanel {
     this.closeFilterPopover();
     const controls = this.createControls(document, this.results ?? []);
     const current = panelContent.querySelector<HTMLElement>(
-      ".zoterofigure-sidebar-controls",
+      ".pasiofigure-sidebar-controls",
     );
     if (current?.parentElement === panelContent) current.replaceWith(controls);
     else panelContent.prepend(controls);
@@ -672,7 +672,7 @@ export class FigureSidebarPanel {
       createdPanel = true;
       this.panel = this.document.createElement("div");
       this.panel.id = PANEL_ID;
-      this.panel.className = "viewWrapper zoterofigure-panel-wrapper";
+      this.panel.className = "viewWrapper pasiofigure-panel-wrapper";
       this.panel.tabIndex = -1;
       this.panel.setAttribute("role", "tabpanel");
       this.panel.setAttribute("data-tabstop", "1");
@@ -688,7 +688,7 @@ export class FigureSidebarPanel {
         if (event.button === 2) event.stopPropagation();
       });
       this.panelContent = this.document.createElement("div");
-      this.panelContent.className = "zoterofigure-sidebar-panel";
+      this.panelContent.className = "pasiofigure-sidebar-panel";
       this.panel.append(this.panelContent);
     }
     if (!content.contains(this.panel)) content.append(this.panel);
@@ -711,7 +711,7 @@ export class FigureSidebarPanel {
     this.resultCards.clear();
     this.imageLoads.reset();
     const loading = document.createElement("div");
-    loading.className = "zoterofigure-sidebar-list";
+    loading.className = "pasiofigure-sidebar-list";
     loading.append(this.createLoading(document));
     panelContent.replaceChildren(this.createControls(document, []), loading);
     this.requestResults(panelContent);
@@ -746,8 +746,7 @@ export class FigureSidebarPanel {
       const document = this.document;
       if (!document) return;
       const message = document.createElement("div");
-      message.className =
-        "zoterofigure-sidebar-empty zoterofigure-sidebar-error";
+      message.className = "pasiofigure-sidebar-empty pasiofigure-sidebar-error";
       message.textContent = `${getString("sidebar-load-error")}: ${toError(error).message}`;
       if (this.results !== undefined) {
         this.renderContent(panelContent, this.results);
@@ -790,7 +789,7 @@ export class FigureSidebarPanel {
       (result) => result,
     );
     const list = document.createElement("div");
-    list.className = "zoterofigure-sidebar-list";
+    list.className = "pasiofigure-sidebar-list";
     list.setAttribute("role", "listbox");
     list.setAttribute("aria-multiselectable", "true");
     list.setAttribute("aria-label", getString("sidebar-title"));
@@ -815,7 +814,7 @@ export class FigureSidebarPanel {
     this.updateSelection();
     if (this.batchStatus) {
       const status = document.createElement("div");
-      status.className = "zoterofigure-sidebar-status";
+      status.className = "pasiofigure-sidebar-status";
       status.setAttribute("role", "status");
       status.textContent = this.batchStatus;
       children.push(status);
@@ -827,7 +826,7 @@ export class FigureSidebarPanel {
     }
     if (this.translationError) {
       const status = document.createElement("div");
-      status.className = "zoterofigure-sidebar-status";
+      status.className = "pasiofigure-sidebar-status";
       status.textContent = getString("sidebar-translation-error");
       children.push(status);
     }
@@ -841,7 +840,7 @@ export class FigureSidebarPanel {
     results: readonly StoredFigureResult[],
   ): HTMLDivElement {
     const controls = document.createElement("div");
-    controls.className = "zoterofigure-sidebar-controls";
+    controls.className = "pasiofigure-sidebar-controls";
     controls.append(this.createActions(document, results));
     if (results.length > 0) {
       controls.append(this.createFilters(document, results));
@@ -851,7 +850,7 @@ export class FigureSidebarPanel {
 
   private createLoading(document: Document): HTMLElement {
     const loading = document.createElement("div");
-    loading.className = "zoterofigure-sidebar-empty";
+    loading.className = "pasiofigure-sidebar-empty";
     loading.textContent = getString("sidebar-loading");
     return loading;
   }
@@ -864,7 +863,7 @@ export class FigureSidebarPanel {
       const button = document.createElement("button");
       button.type = "button";
       button.className =
-        "zoterofigure-sidebar-empty zoterofigure-sidebar-empty-action";
+        "pasiofigure-sidebar-empty pasiofigure-sidebar-empty-action";
       button.textContent = getString("sidebar-start-analysis");
       button.disabled = this.options.isAnalyzing();
       button.addEventListener("click", () => {
@@ -876,7 +875,7 @@ export class FigureSidebarPanel {
       return button;
     }
     const empty = document.createElement("div");
-    empty.className = "zoterofigure-sidebar-empty";
+    empty.className = "pasiofigure-sidebar-empty";
     empty.textContent = getString("sidebar-empty");
     return empty;
   }
@@ -886,7 +885,7 @@ export class FigureSidebarPanel {
     value: SidebarAnalysisProgress,
   ): HTMLDivElement {
     const container = document.createElement("div");
-    container.className = `zoterofigure-analysis-progress is-${value.state}`;
+    container.className = `pasiofigure-analysis-progress is-${value.state}`;
     container.setAttribute("role", "progressbar");
     container.setAttribute("aria-valuemin", "0");
     container.setAttribute("aria-valuemax", "100");
@@ -897,23 +896,23 @@ export class FigureSidebarPanel {
     );
 
     const heading = document.createElement("div");
-    heading.className = "zoterofigure-analysis-progress-heading";
+    heading.className = "pasiofigure-analysis-progress-heading";
     const title = document.createElement("span");
     title.textContent = getString("sidebar-analysis-progress-title");
     const percentage = document.createElement("span");
-    percentage.className = "zoterofigure-analysis-progress-percentage";
+    percentage.className = "pasiofigure-analysis-progress-percentage";
     percentage.textContent = `${Math.round(value.progress)}%`;
     heading.append(title, percentage);
 
     const track = document.createElement("div");
-    track.className = "zoterofigure-analysis-progress-track";
+    track.className = "pasiofigure-analysis-progress-track";
     const fill = document.createElement("div");
-    fill.className = "zoterofigure-analysis-progress-fill";
+    fill.className = "pasiofigure-analysis-progress-fill";
     fill.style.width = `${value.progress}%`;
     track.append(fill);
 
     const detail = document.createElement("div");
-    detail.className = "zoterofigure-analysis-progress-detail";
+    detail.className = "pasiofigure-analysis-progress-detail";
     detail.textContent = value.text;
     container.append(heading, track, detail);
     return container;
@@ -924,27 +923,27 @@ export class FigureSidebarPanel {
     const panelContent = this.panelContent;
     if (!document || !panelContent) return;
     const current = panelContent.querySelector<HTMLElement>(
-      ".zoterofigure-analysis-progress",
+      ".pasiofigure-analysis-progress",
     );
     if (this.analysisProgress) {
       if (current) {
-        current.className = `zoterofigure-analysis-progress is-${this.analysisProgress.state}`;
+        current.className = `pasiofigure-analysis-progress is-${this.analysisProgress.state}`;
         current.setAttribute(
           "aria-valuenow",
           String(Math.round(this.analysisProgress.progress)),
         );
         const percentage = current.querySelector<HTMLElement>(
-          ".zoterofigure-analysis-progress-percentage",
+          ".pasiofigure-analysis-progress-percentage",
         );
         if (percentage) {
           percentage.textContent = `${Math.round(this.analysisProgress.progress)}%`;
         }
         const fill = current.querySelector<HTMLElement>(
-          ".zoterofigure-analysis-progress-fill",
+          ".pasiofigure-analysis-progress-fill",
         );
         if (fill) fill.style.width = `${this.analysisProgress.progress}%`;
         const detail = current.querySelector<HTMLElement>(
-          ".zoterofigure-analysis-progress-detail",
+          ".pasiofigure-analysis-progress-detail",
         );
         if (detail) detail.textContent = this.analysisProgress.text;
       } else {
@@ -953,7 +952,7 @@ export class FigureSidebarPanel {
           this.analysisProgress,
         );
         const controls = panelContent.querySelector<HTMLElement>(
-          ".zoterofigure-sidebar-controls",
+          ".pasiofigure-sidebar-controls",
         );
         if (controls) controls.after(next);
         else panelContent.prepend(next);
@@ -964,13 +963,13 @@ export class FigureSidebarPanel {
 
     if (this.results !== undefined) {
       const list = panelContent.querySelector<HTMLElement>(
-        ".zoterofigure-sidebar-list",
+        ".pasiofigure-sidebar-list",
       );
       const empty = list?.querySelector<HTMLElement>(
-        ".zoterofigure-sidebar-empty",
+        ".pasiofigure-sidebar-empty",
       );
       const hasVisibleCards = Boolean(
-        list?.querySelector(".zoterofigure-sidebar-card"),
+        list?.querySelector(".pasiofigure-sidebar-card"),
       );
       if (
         shouldShowFigureSidebarEmptyState(
@@ -992,7 +991,7 @@ export class FigureSidebarPanel {
     results: readonly StoredFigureResult[],
   ): HTMLElement {
     const actions = document.createElement("div");
-    actions.className = "zoterofigure-sidebar-actions";
+    actions.className = "pasiofigure-sidebar-actions";
     const analyzing = this.options.isAnalyzing();
     const translationAvailable =
       this.pdfTranslateAvailable ??
@@ -1093,11 +1092,11 @@ export class FigureSidebarPanel {
       "plugin",
       analyzing ? this.options.onCancelAnalysis : this.options.onAnalyze,
     );
-    button.classList.add("zoterofigure-analysis-action");
+    button.classList.add("pasiofigure-analysis-action");
     if (analyzing) {
       button.setAttribute("aria-busy", "true");
       const magnifier = createFigureSidebarIcon(document, "search");
-      magnifier.classList.add("zoterofigure-analysis-magnifier");
+      magnifier.classList.add("pasiofigure-analysis-magnifier");
       button.append(magnifier);
     }
     return button;
@@ -1120,7 +1119,7 @@ export class FigureSidebarPanel {
   ): HTMLButtonElement {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "zoterofigure-sidebar-action";
+    button.className = "pasiofigure-sidebar-action";
     button.title = getString(labelKey);
     button.setAttribute("aria-label", getString(labelKey));
     button.disabled = disabled;
@@ -1128,7 +1127,7 @@ export class FigureSidebarPanel {
       iconKind === "note"
         ? createNativeNoteIcon(document)
         : iconKind === "plugin"
-          ? createPluginIcon(document, "zoterofigure-analysis-plugin-icon")
+          ? createPluginIcon(document, "pasiofigure-analysis-plugin-icon")
           : createFigureSidebarIcon(document, iconKind),
     );
     button.addEventListener("click", () => {
@@ -1144,7 +1143,7 @@ export class FigureSidebarPanel {
     results: readonly StoredFigureResult[],
   ): HTMLElement {
     const filters = document.createElement("div");
-    filters.className = "zoterofigure-sidebar-filters";
+    filters.className = "pasiofigure-sidebar-filters";
     const counts = countFigureSidebarItems(results, (result) => result);
     for (const filter of ["figure", "table", "formula"] as const) {
       if (counts[filter] === 0) continue;
@@ -1154,10 +1153,10 @@ export class FigureSidebarPanel {
         (result) => result,
       );
       const slot = document.createElement("div");
-      slot.className = "zoterofigure-sidebar-filter-slot";
+      slot.className = "pasiofigure-sidebar-filter-slot";
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "zoterofigure-sidebar-filter";
+      button.className = "pasiofigure-sidebar-filter";
       button.dataset.filter = filter;
       const selected = this.filters.has(filter);
       button.classList.toggle("selected", selected);
@@ -1168,15 +1167,15 @@ export class FigureSidebarPanel {
       button.setAttribute("aria-label", `${counts[filter]} ${filterLabel}`);
 
       const content = document.createElement("div");
-      content.className = "zoterofigure-sidebar-filter-content";
+      content.className = "pasiofigure-sidebar-filter-content";
       const icon = document.createElement("div");
-      icon.className = "zoterofigure-sidebar-filter-icon";
+      icon.className = "pasiofigure-sidebar-filter-icon";
       icon.append(createFigureSidebarIcon(document, filter));
       const count = document.createElement("span");
-      count.className = "zoterofigure-sidebar-filter-count";
+      count.className = "pasiofigure-sidebar-filter-count";
       count.textContent = String(counts[filter]);
       const label = document.createElement("span");
-      label.className = "zoterofigure-sidebar-filter-label";
+      label.className = "pasiofigure-sidebar-filter-label";
       label.textContent = filterLabel;
       content.append(icon, count, label);
       button.append(content);
@@ -1188,7 +1187,7 @@ export class FigureSidebarPanel {
         if (restoreKeyboardFocus) {
           this.panelContent
             ?.querySelector<HTMLButtonElement>(
-              `.zoterofigure-sidebar-filter[data-filter="${filter}"]`,
+              `.pasiofigure-sidebar-filter[data-filter="${filter}"]`,
             )
             ?.focus();
         }
@@ -1250,7 +1249,7 @@ export class FigureSidebarPanel {
     this.closeFilterPopover();
     const popover = document.createElement("div");
     popover.id = FILTER_POPOVER_ID;
-    popover.className = "zoterofigure-filter-results";
+    popover.className = "pasiofigure-filter-results";
     popover.dataset.filter = filter;
     popover.setAttribute(
       "aria-label",
@@ -1261,7 +1260,7 @@ export class FigureSidebarPanel {
     for (const result of results) {
       const item = document.createElement("button");
       item.type = "button";
-      item.className = "zoterofigure-filter-result";
+      item.className = "pasiofigure-filter-result";
       item.dataset.resultId = result.id;
       item.setAttribute("role", "menuitem");
       item.tabIndex = -1;
@@ -1275,10 +1274,10 @@ export class FigureSidebarPanel {
       item.setAttribute("aria-label", `${label}, ${pageLabel}`);
       item.title = `${label} - ${pageLabel}`;
       const text = document.createElement("span");
-      text.className = "zoterofigure-filter-result-label";
+      text.className = "pasiofigure-filter-result-label";
       text.textContent = label;
       const page = document.createElement("span");
-      page.className = "zoterofigure-filter-result-page";
+      page.className = "pasiofigure-filter-result-page";
       page.textContent = pageLabel;
       item.append(text, page);
       item.addEventListener("click", (event) => {
@@ -1428,7 +1427,7 @@ export class FigureSidebarPanel {
       const cardBounds = card.getBoundingClientRect();
       const controlsHeight =
         this.panelContent
-          ?.querySelector<HTMLElement>(".zoterofigure-sidebar-controls")
+          ?.querySelector<HTMLElement>(".pasiofigure-sidebar-controls")
           ?.getBoundingClientRect().height ?? 0;
       const top =
         viewport.scrollTop +
@@ -1538,7 +1537,7 @@ export class FigureSidebarPanel {
     const document = this.document;
     if (!document) throw new Error("Figure sidebar document is unavailable");
     const card = document.createElement("article");
-    card.className = "zoterofigure-sidebar-card";
+    card.className = "pasiofigure-sidebar-card";
     card.dataset.resultId = result.id;
     card.tabIndex = 0;
     card.setAttribute("role", "option");
@@ -1551,7 +1550,7 @@ export class FigureSidebarPanel {
     const header = document.createElement("header");
     const start = this.createCardStart(document, result);
     const end = document.createElement("div");
-    end.className = "zoterofigure-card-end";
+    end.className = "pasiofigure-card-end";
     end.append(this.createMenuButton(document, result));
     header.append(start, end);
 
@@ -1669,7 +1668,7 @@ export class FigureSidebarPanel {
     result: StoredFigureResult,
   ): HTMLDivElement {
     const media = document.createElement("div");
-    media.className = "zoterofigure-card-image";
+    media.className = "pasiofigure-card-image";
     if (result.kind === "formula" && result.latex) {
       media.classList.add("is-latex", "is-loaded");
       media.append(this.createRenderedLatex(document, result.latex));
@@ -1686,7 +1685,7 @@ export class FigureSidebarPanel {
 
   private createRenderedLatex(document: Document, latex: string): HTMLElement {
     const formula = document.createElement("div");
-    formula.className = "zoterofigure-rendered-latex";
+    formula.className = "pasiofigure-rendered-latex";
     formula.setAttribute("aria-label", latex);
     renderLatex(formula, latex);
     return formula;
@@ -1697,10 +1696,10 @@ export class FigureSidebarPanel {
     result: StoredFigureResult,
   ): HTMLElement {
     const start = document.createElement("div");
-    start.className = "zoterofigure-card-start";
+    start.className = "pasiofigure-card-start";
     start.append(createFigureSidebarIcon(document, result.kind));
     const page = document.createElement("span");
-    page.className = "zoterofigure-card-page";
+    page.className = "pasiofigure-card-page";
     page.textContent = getString("sidebar-page", {
       args: { page: result.pageLabel },
     });
@@ -1838,7 +1837,7 @@ export class FigureSidebarPanel {
       element.setAttribute("role", "group");
       orphanedElement = element;
       const imageContainer = element.querySelector<HTMLElement>(
-        ".zoterofigure-card-image",
+        ".pasiofigure-card-image",
       );
       if (!imageContainer) return;
       const cropWidth = result.rect[2] - result.rect[0];
@@ -1863,7 +1862,7 @@ export class FigureSidebarPanel {
         "error",
         () => {
           const placeholder = document.createElement("span");
-          placeholder.className = "zoterofigure-card-image-placeholder";
+          placeholder.className = "pasiofigure-card-image-placeholder";
           placeholder.textContent = getString("sidebar-image-unavailable");
           imageContainer.replaceChildren(placeholder);
         },
@@ -1930,18 +1929,16 @@ export class FigureSidebarPanel {
     });
 
     const menuHost = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-end",
+      ".pasiofigure-card-end",
     );
     menuHost?.replaceChildren(this.createMenuButton(document, result));
 
     const existingComment = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-comment",
+      ".pasiofigure-card-comment",
     );
     existingComment?.replaceWith(this.createComment(document, result));
 
-    const image = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-image",
-    );
+    const image = element.querySelector<HTMLElement>(".pasiofigure-card-image");
     image?.addEventListener("dblclick", (event) => {
       event.stopPropagation();
       void this.goToPage(getCurrentResult()).catch((error) =>
@@ -2101,16 +2098,14 @@ export class FigureSidebarPanel {
   ): void {
     const element = entry.element;
     const imageContainer = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-image",
+      ".pasiofigure-card-image",
     );
-    const start = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-start",
-    );
+    const start = element.querySelector<HTMLElement>(".pasiofigure-card-start");
     const menuHost = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-end",
+      ".pasiofigure-card-end",
     );
     const comment = element.querySelector<HTMLElement>(
-      ".zoterofigure-card-comment",
+      ".pasiofigure-card-comment",
     );
     if (!imageContainer || !start || !menuHost || !comment) {
       throw new Error("Pinned card structure changed during refresh");
@@ -2120,7 +2115,7 @@ export class FigureSidebarPanel {
     element.setAttribute("aria-label", content.ariaLabel);
     start.replaceWith(content.start);
     menuHost
-      .querySelector(".zoterofigure-card-menu:not(.zoterofigure-card-pin)")
+      .querySelector(".pasiofigure-card-menu:not(.pasiofigure-card-pin)")
       ?.replaceWith(content.menuButton);
     comment.replaceWith(content.comment);
     imageContainer.style.aspectRatio = "";
@@ -2145,12 +2140,12 @@ export class FigureSidebarPanel {
     const expanded = this.expandedComments.has(result.id);
     const comment = document.createElement("button");
     comment.type = "button";
-    comment.className = "zoterofigure-card-comment";
+    comment.className = "pasiofigure-card-comment";
     comment.title = getString("sidebar-edit-caption-hint");
     if (text) this.applyCommentExpansion(comment, expanded);
     else comment.classList.add("is-empty");
     const textNode = document.createElement("span");
-    textNode.className = "zoterofigure-card-comment-text";
+    textNode.className = "pasiofigure-card-comment-text";
     textNode.textContent = text || getString("sidebar-no-caption");
     comment.append(textNode);
     comment.addEventListener("click", (event) => {
@@ -2180,7 +2175,7 @@ export class FigureSidebarPanel {
     ];
     for (const card of cards) {
       const comment = card?.querySelector<HTMLElement>(
-        ".zoterofigure-card-comment:not(.is-empty)",
+        ".pasiofigure-card-comment:not(.is-empty)",
       );
       if (comment) this.applyCommentExpansion(comment, expanded);
     }
@@ -2220,7 +2215,7 @@ export class FigureSidebarPanel {
   ): HTMLButtonElement {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "zoterofigure-card-menu";
+    button.className = "pasiofigure-card-menu";
     button.title = getString("sidebar-menu");
     button.setAttribute("aria-label", getString("sidebar-menu"));
     this.setMenuButtonState(
@@ -2242,7 +2237,7 @@ export class FigureSidebarPanel {
     if (this.batchBusy) return;
     this.closeMenu();
     const sourceCard = anchor.closest<HTMLElement>(
-      ".zoterofigure-sidebar-card:not(.zoterofigure-pinned-card)",
+      ".pasiofigure-sidebar-card:not(.pasiofigure-pinned-card)",
     );
     if (sourceCard && !this.selectedResultIDs.has(result.id))
       this.selectResult(result.id, {
@@ -2382,21 +2377,21 @@ export class FigureSidebarPanel {
   private async openLatexEditor(result: StoredFigureResult): Promise<void> {
     const document = this.document;
     logLatexEditor(
-      `[Zotero Figure][LaTeX editor] menu command: id=${result.id}, document=${document ? "ready" : "missing"}, latexLength=${result.latex?.length ?? 0}`,
+      `[PDF Figure (pasiooooo)][LaTeX editor] menu command: id=${result.id}, document=${document ? "ready" : "missing"}, latexLength=${result.latex?.length ?? 0}`,
     );
     if (!document || !result.latex) return;
     this.formulaLatexErrors.delete(result.id);
     try {
       const updated = await this.resultEditors.editLatex(result);
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] panel result: id=${result.id}, updated=${Boolean(updated)}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] panel result: id=${result.id}, updated=${Boolean(updated)}`,
       );
       if (updated && !this.disposed && this.document === document) {
         this.applyUpdatedResult(updated);
       }
     } catch (error) {
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] panel caught error: id=${result.id}, message=${toError(error).message}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] panel caught error: id=${result.id}, message=${toError(error).message}`,
       );
       if (this.disposed || this.document !== document) return;
       this.formulaLatexErrors.set(
@@ -2425,31 +2420,31 @@ export class FigureSidebarPanel {
     for (const card of cards) {
       if (!card) continue;
       const document = card.ownerDocument;
-      card.querySelector(".zoterofigure-card-latex-error")?.remove();
+      card.querySelector(".pasiofigure-card-latex-error")?.remove();
       card
-        .querySelector<HTMLElement>(".zoterofigure-card-end")
+        .querySelector<HTMLElement>(".pasiofigure-card-end")
         ?.replaceChildren(this.createMenuButton(document, updated));
       card
-        .querySelector<HTMLElement>(".zoterofigure-card-comment")
+        .querySelector<HTMLElement>(".pasiofigure-card-comment")
         ?.replaceWith(this.createComment(document, updated));
       if (previous?.latex !== updated.latex) {
         this.imageLoads.unregister(updated.id);
         const currentMedia = card.querySelector<HTMLElement>(
-          ".zoterofigure-card-image",
+          ".pasiofigure-card-image",
         );
         const nextMedia = this.createCardMedia(document, updated);
         this.bindCardMediaInteractions(nextMedia, updated, card);
         currentMedia?.replaceWith(nextMedia);
       }
       const image = card.querySelector<HTMLImageElement>(
-        ".zoterofigure-card-image img",
+        ".pasiofigure-card-image img",
       );
       if (image) image.alt = this.getDisplayComment(updated);
     }
     const pinnedCard = this.pinnedCards.get(updated.id);
     if (pinnedCard) this.requestPinnedCardRefresh(pinnedCard, updated);
     if (previous?.comment !== updated.comment) {
-      const list = this.panel?.querySelector(".zoterofigure-sidebar-list");
+      const list = this.panel?.querySelector(".pasiofigure-sidebar-list");
       const cards = new Map(this.resultCards);
       this.resultCards.clear();
       for (const result of filterAndSortFigureSidebarItems(
@@ -2595,7 +2590,7 @@ export class FigureSidebarPanel {
       this.pinnedCards.get(resultID)?.element,
     ]) {
       const button = card?.querySelector<HTMLButtonElement>(
-        ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+        ".pasiofigure-card-menu:not(.pasiofigure-card-pin)",
       );
       if (button) this.setMenuButtonState(button, "menu");
     }
@@ -2605,7 +2600,7 @@ export class FigureSidebarPanel {
     anchor: HTMLButtonElement,
   ): HTMLElement | undefined {
     return typeof anchor.closest === "function"
-      ? (anchor.closest<HTMLElement>(".zoterofigure-sidebar-card") ?? undefined)
+      ? (anchor.closest<HTMLElement>(".pasiofigure-sidebar-card") ?? undefined)
       : undefined;
   }
 
@@ -2620,19 +2615,19 @@ export class FigureSidebarPanel {
       sourceCard?.isConnected === false
         ? undefined
         : sourceCard?.querySelector<HTMLButtonElement>(
-            ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+            ".pasiofigure-card-menu:not(.pasiofigure-card-pin)",
           );
     const button =
       sourceButton ??
       this.resultCards
         .get(resultID)
         ?.querySelector<HTMLButtonElement>(
-          ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+          ".pasiofigure-card-menu:not(.pasiofigure-card-pin)",
         ) ??
       this.pinnedCards
         .get(resultID)
         ?.element.querySelector<HTMLButtonElement>(
-          ".zoterofigure-card-menu:not(.zoterofigure-card-pin)",
+          ".pasiofigure-card-menu:not(.pasiofigure-card-pin)",
         ) ??
       anchor;
     this.setMenuButtonState(button, state, action);
@@ -2645,10 +2640,10 @@ export class FigureSidebarPanel {
       this.pinnedCards.get(result.id)?.element,
     ]) {
       if (!card) continue;
-      card.querySelector(".zoterofigure-card-latex-error")?.remove();
+      card.querySelector(".pasiofigure-card-latex-error")?.remove();
       if (!error) continue;
       const message = card.ownerDocument.createElement("div");
-      message.className = "zoterofigure-card-latex-error";
+      message.className = "pasiofigure-card-latex-error";
       message.setAttribute("role", "status");
       message.textContent = error;
       card.append(message);
@@ -2743,7 +2738,7 @@ export class FigureSidebarPanel {
   private createTab(document: Document): HTMLButtonElement {
     const button = document.createElement("button");
     button.id = TAB_ID;
-    button.className = "toolbar-button zoterofigure-sidebar-tab";
+    button.className = "toolbar-button pasiofigure-sidebar-tab";
     button.type = "button";
     button.tabIndex = -1;
     button.title = getString("sidebar-title");
@@ -2761,7 +2756,7 @@ export class FigureSidebarPanel {
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = Zotero.File.getContentsFromURL(
-      "chrome://zoterofigure/content/figure-sidebar.css",
+      "chrome://pasiofigure/content/figure-sidebar.css",
     );
     (document.head ?? document.documentElement).append(style);
   }
@@ -2771,7 +2766,7 @@ export class FigureSidebarPanel {
       _state?: { sidebarView?: string };
       setSidebarView?: (view: string) => void;
     };
-    if (view === "zoterofigure") {
+    if (view === "pasiofigure") {
       const current = internalReader._state?.sidebarView;
       if (isNativeSidebarView(current)) this.previousSidebarView = current;
     }

@@ -154,7 +154,12 @@ test("shows the project links, Pro plugins promotion, and package version", () =
     markup,
     /href="https:\/\/github\.com\/MuiseDestiny\/zotero-figure"/,
   );
-  assert.match(markup, /href="https:\/\/github\.com\/MuiseDestiny"/);
+  assert.match(markup, /href="https:\/\/github\.com\/pasiooooo"/);
+  assert.match(
+    markup,
+    /href="https:\/\/github\.com\/pasiooooo\/zotero-figure"/,
+  );
+  assert.match(markup, /data-l10n-id="preferences-about-upstream"/);
   assert.match(markup, /href="https:\/\/space\.bilibili\.com\/13557814"/);
   assert.match(
     markup,

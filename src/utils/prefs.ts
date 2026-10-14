@@ -1,6 +1,7 @@
 import { config } from "../../package.json";
 
 export interface PreferenceSchema {
+  forkMigrationComplete: boolean;
   autoRecognizeFormula: boolean;
   duplicateMode: "replace-page" | "skip-existing";
   /** Retired: migrated to the data directory by figureGalleryComparisonStore. */

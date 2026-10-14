@@ -58,7 +58,7 @@ export class FigureBatchController {
       icon: MENU_ICON,
       id: MENU_ID,
       isHidden: () => !hasSupportedSelection(),
-      label: "PDF Figure",
+      label: config.addonName,
       tag: "menu",
     });
     ztoolkit.Menu.register("item", {

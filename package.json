@@ -1,13 +1,14 @@
 {
   "name": "zotero-figure",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Local figure and table extraction for Zotero PDFs",
   "config": {
-    "addonName": "PDF Figure",
-    "addonID": "zoterofigure@polygon.org",
-    "addonRef": "zoterofigure",
-    "addonInstance": "ZoteroFigure",
-    "prefsPrefix": "extensions.zotero.zoterofigure",
+    "addonName": "PDF Figure (pasiooooo)",
+    "addonID": "zotero-figure@pasiooooo.github.io",
+    "addonRef": "pasiofigure",
+    "addonInstance": "PasioFigure",
+    "prefsPrefix": "extensions.zotero.pasiofigure",
+    "dataDirectory": "zotero-figure-pasiooooo",
     "updateLink": "https://github.com/pasiooooo/zotero-figure/releases/latest/download/zotero-figure.xpi",
     "updateURL": "https://github.com/pasiooooo/zotero-figure/releases/latest/download/update.json"
   },
@@ -38,7 +39,7 @@
     "type": "git",
     "url": "git+https://github.com/pasiooooo/zotero-figure.git"
   },
-  "author": "Polygon",
+  "author": "pasiooooo (fork), Polygon (upstream)",
   "license": "AGPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/pasiooooo/zotero-figure/issues"

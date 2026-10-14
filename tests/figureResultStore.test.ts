@@ -515,7 +515,7 @@ for (const scenario of [
       );
       assert.equal(
         harness.io.exists(
-          `/data/zotero-figure/results/4/ATTACHMENT/images/${getFigureResultID(
+          `/data/zotero-figure-pasiooooo/results/4/ATTACHMENT/images/${getFigureResultID(
             added,
           )}.png`,
         ),
@@ -1492,19 +1492,19 @@ test("discovers only attachment result directories with manifests", async () => 
   const store = new FigureResultStore();
   try {
     harness.io.writeText(
-      "/data/zotero-figure/results/4/B_ATTACHMENT/manifest.json",
+      "/data/zotero-figure-pasiooooo/results/4/B_ATTACHMENT/manifest.json",
       "{}",
     );
     harness.io.writeText(
-      "/data/zotero-figure/results/4/A_ATTACHMENT/manifest.json",
+      "/data/zotero-figure-pasiooooo/results/4/A_ATTACHMENT/manifest.json",
       "{}",
     );
     harness.io.writeText(
-      "/data/zotero-figure/results/4/NO_MANIFEST/images/result.png",
+      "/data/zotero-figure-pasiooooo/results/4/NO_MANIFEST/images/result.png",
       "not-an-image",
     );
     harness.io.writeText(
-      "/data/zotero-figure/results/4/invalid.key/manifest.json",
+      "/data/zotero-figure-pasiooooo/results/4/invalid.key/manifest.json",
       "{}",
     );
 
@@ -1703,7 +1703,7 @@ function bytes(...values: number[]): ArrayBuffer {
 }
 
 function getManifestPath(): string {
-  return "/data/zotero-figure/results/4/ATTACHMENT/manifest.json";
+  return "/data/zotero-figure-pasiooooo/results/4/ATTACHMENT/manifest.json";
 }
 
 function deferred<Value>(): {

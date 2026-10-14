@@ -942,7 +942,7 @@ test("sidebar right click preserves multi-selection and also opens from list whi
     state.handlePanelContextMenu({
       target: {
         closest: (selector: string) =>
-          selector === ".zoterofigure-sidebar-card"
+          selector === ".pasiofigure-sidebar-card"
             ? state.resultCards.get(id ?? "")
             : editable
               ? {}

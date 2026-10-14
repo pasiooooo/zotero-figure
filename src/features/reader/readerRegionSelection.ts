@@ -46,7 +46,7 @@ export function startReaderRegionSelection(
 
   // Keep the drag outside the PDF iframe so native annotation handlers never receive it.
   const overlay = document.createElement("div");
-  overlay.id = "zoterofigure-region-capture";
+  overlay.id = "pasiofigure-region-capture";
   overlay.tabIndex = -1;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");

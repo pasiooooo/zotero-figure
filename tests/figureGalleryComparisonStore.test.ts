@@ -9,7 +9,7 @@ import {
 } from "../src/services/results/figureGalleryComparisonStore";
 import { installMemoryIO, type MemoryIOHarness } from "./helpers/memoryIO";
 
-const STORE_PATH = "/data/zotero-figure/comparison-layouts.json";
+const STORE_PATH = "/data/zotero-figure-pasiooooo/comparison-layouts.json";
 
 interface StoreHarness {
   errors: Error[];
@@ -97,7 +97,7 @@ test("migrates a legacy preference payload and clears the preference", async () 
   const harness = installStore();
   const legacy = { "1": { documentOrder: [3, 1], rows: [], version: 3 } };
   harness.prefs.set(
-    "extensions.zotero.zoterofigure.galleryComparisonLayouts",
+    "extensions.zotero.pasiofigure.galleryComparisonLayouts",
     JSON.stringify(legacy),
   );
   try {
@@ -249,7 +249,7 @@ test("keeps the legacy preference until a failed migration has been retried succ
   const harness = installStore();
   const write = IOUtils.writeUTF8;
   const legacy = { "1": { documentOrder: [3, 1], rows: [], version: 3 } };
-  const key = "extensions.zotero.zoterofigure.galleryComparisonLayouts";
+  const key = "extensions.zotero.pasiofigure.galleryComparisonLayouts";
   harness.prefs.set(key, JSON.stringify(legacy));
   try {
     IOUtils.writeUTF8 = async () => {

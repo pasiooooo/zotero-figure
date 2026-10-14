@@ -24,7 +24,7 @@ artifact.
 The source asset is stored at the `embeddedPath` declared in `model-manifest.json`. At runtime the plugin reads that local `chrome://` resource, writes a temporary copy, verifies exact size and SHA-256, then moves it to:
 
 ```text
-Zotero.DataDirectory.dir/zotero-figure/models/
+Zotero.DataDirectory.dir/zotero-figure-pasiooooo/models/
 ```
 
 The installed copy is validated again before inference. Missing or corrupted copies are restored from the XPI without network access.

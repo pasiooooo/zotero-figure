@@ -746,7 +746,7 @@ test("explicit replacement overrides skip-existing preference and prunes obsolet
     assert.equal(results[0].tag, "Figure 1");
     assert.equal(results[0].pageIndex, 0);
     assert.equal(
-      Zotero.Prefs.get("extensions.zotero.zoterofigure.duplicateMode"),
+      Zotero.Prefs.get("extensions.zotero.pasiofigure.duplicateMode"),
       "skip-existing",
     );
   } finally {
@@ -1039,7 +1039,10 @@ function installAnalyzerHarness(options: AnalyzerHarnessOptions = {}): {
   const previousZtoolkit = (globalThis as any).ztoolkit;
   const originalEnsureModel = modelManager.ensureRecommendedModel;
   const io = installMemoryIO();
-  io.writeBytes("/data/zotero-figure/models/model.onnx", Uint8Array.of(1));
+  io.writeBytes(
+    "/data/zotero-figure-pasiooooo/models/model.onnx",
+    Uint8Array.of(1),
+  );
   let writes = 0;
   const annotationComments: string[] = [];
   const logs: unknown[][] = [];
@@ -1083,7 +1086,7 @@ function installAnalyzerHarness(options: AnalyzerHarnessOptions = {}): {
   } as unknown as typeof Zotero;
   modelManager.ensureRecommendedModel = async () => ({
     hash: RECOMMENDED_MODEL.sha256,
-    path: "/data/zotero-figure/models/model.onnx",
+    path: "/data/zotero-figure-pasiooooo/models/model.onnx",
     size: RECOMMENDED_MODEL.size,
     state: "valid",
     variant: RECOMMENDED_MODEL,

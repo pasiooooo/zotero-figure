@@ -344,7 +344,7 @@ function createSidebarImagePlaceholder(
   state: PlaceholderState,
 ): HTMLSpanElement {
   const placeholder = document.createElement("span");
-  placeholder.className = "zoterofigure-card-image-placeholder";
+  placeholder.className = "pasiofigure-card-image-placeholder";
   placeholder.textContent = getString(
     state === "failed"
       ? "sidebar-image-unavailable"

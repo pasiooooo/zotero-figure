@@ -32,9 +32,9 @@ test("opens the addon-owned CodeMirror window and returns its saved source", asy
 
   assert.equal(
     ownerWindow.openedURL,
-    "chrome://zoterofigure/content/latex-editor/index.html",
+    "chrome://pasiofigure/content/latex-editor/index.html",
   );
-  assert.equal(ownerWindow.openedName, "zoterofigure-latex-editor");
+  assert.equal(ownerWindow.openedName, "pasiofigure-latex-editor");
   assert.equal(
     ownerWindow.openedFeatures,
     "chrome,centerscreen,dialog=no,resizable,width=800,height=600",

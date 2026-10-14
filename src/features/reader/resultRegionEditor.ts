@@ -29,7 +29,7 @@ export function installResultRegionEditor(
 ): ResultRegionEditorSession {
   const style = document.createElement("style");
   style.textContent = `
-    #zoterofigure-region-editor {
+    #pasiofigure-region-editor {
       align-items: center;
       box-sizing: border-box;
       display: flex;
@@ -41,20 +41,20 @@ export function installResultRegionEditor(
       padding: 8px 8px 0;
       width: calc(100vw - 24px);
     }
-    #zoterofigure-region-stage {
+    #pasiofigure-region-stage {
       background: var(--material-mix-quinary);
       flex: 0 0 auto;
       line-height: 0;
       overflow: hidden;
       position: relative;
     }
-    #zoterofigure-region-page {
+    #pasiofigure-region-page {
       display: block;
       height: 100%;
       user-select: none;
       width: 100%;
     }
-    #zoterofigure-region-selection {
+    #pasiofigure-region-selection {
       background: color-mix(in srgb, var(--accent-blue, #3b82f6) 14%, transparent);
       border: 2px solid var(--accent-blue, #3b82f6);
       box-sizing: border-box;
@@ -62,7 +62,7 @@ export function installResultRegionEditor(
       position: absolute;
       touch-action: none;
     }
-    .zoterofigure-region-handle {
+    .pasiofigure-region-handle {
       background: var(--material-background);
       border: 2px solid var(--accent-blue, #3b82f6);
       box-sizing: border-box;
@@ -70,27 +70,27 @@ export function installResultRegionEditor(
       position: absolute;
       width: 12px;
     }
-    .zoterofigure-region-handle[data-handle="nw"] { cursor: nwse-resize; left: 0; top: 0; transform: translate(-50%, -50%); }
-    .zoterofigure-region-handle[data-handle="ne"] { cursor: nesw-resize; right: 0; top: 0; transform: translate(50%, -50%); }
-    .zoterofigure-region-handle[data-handle="sw"] { bottom: 0; cursor: nesw-resize; left: 0; transform: translate(-50%, 50%); }
-    .zoterofigure-region-handle[data-handle="se"] { bottom: 0; cursor: nwse-resize; right: 0; transform: translate(50%, 50%); }
+    .pasiofigure-region-handle[data-handle="nw"] { cursor: nwse-resize; left: 0; top: 0; transform: translate(-50%, -50%); }
+    .pasiofigure-region-handle[data-handle="ne"] { cursor: nesw-resize; right: 0; top: 0; transform: translate(50%, -50%); }
+    .pasiofigure-region-handle[data-handle="sw"] { bottom: 0; cursor: nesw-resize; left: 0; transform: translate(-50%, 50%); }
+    .pasiofigure-region-handle[data-handle="se"] { bottom: 0; cursor: nwse-resize; right: 0; transform: translate(50%, 50%); }
   `;
 
   const stage = document.createElement("div");
-  stage.id = "zoterofigure-region-stage";
+  stage.id = "pasiofigure-region-stage";
   const image = document.createElement("img");
-  image.id = "zoterofigure-region-page";
+  image.id = "pasiofigure-region-page";
   image.alt = "";
   image.draggable = false;
   const selection = document.createElement("div");
-  selection.id = "zoterofigure-region-selection";
+  selection.id = "pasiofigure-region-selection";
   selection.setAttribute(
     "aria-label",
     getString("sidebar-correct-region-selection"),
   );
   for (const handle of ["nw", "ne", "sw", "se"] as const) {
     const node = document.createElement("span");
-    node.className = "zoterofigure-region-handle";
+    node.className = "pasiofigure-region-handle";
     node.dataset.handle = handle;
     node.setAttribute("aria-hidden", "true");
     selection.append(node);

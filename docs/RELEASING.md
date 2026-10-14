@@ -46,5 +46,6 @@ npm run release -- 1.2.0
 
 - 插件从本仓库最新 Release 的 `update.json` 读取更新信息。
 - 清单中的 XPI 下载地址固定到具体版本标签。
-- 首次从指向上游更新地址的旧安装包切换到本分支时，需要手动安装一次本分支 XPI；之后即可沿本仓库自动更新。
+- 1.1.1 起安装 ID 为 `zotero-figure@pasiooooo.github.io`，更新清单只发布这个 ID。原插件和 1.1.0 无法跨 ID 自动升级；先停用旧插件，手动安装一次新版并重启，之后沿本仓库自动更新。
+- 首次启动会把原 `zotero-figure` 目录复制到 `zotero-figure-pasiooooo`，并复制设置到 `extensions.zotero.pasiofigure`。保留原数据，不覆盖已有分支数据；迁移期间保持旧插件停用，预留复制所需空间。
 - 仍支持 Zotero 9 和 Zotero 10。

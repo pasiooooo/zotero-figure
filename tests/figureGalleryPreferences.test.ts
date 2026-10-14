@@ -15,7 +15,7 @@ import {
 } from "../src/services/results/figureGalleryPreferences";
 import { installMemoryIO, type MemoryIOHarness } from "./helpers/memoryIO";
 
-const STORE_PATH = "/data/zotero-figure/comparison-layouts.json";
+const STORE_PATH = "/data/zotero-figure-pasiooooo/comparison-layouts.json";
 
 interface PreferencesHarness {
   io: MemoryIOHarness;
@@ -79,7 +79,7 @@ test("persists the gallery mode in preferences and layouts in the data directory
     assert.equal(getFigureGalleryComparisonLayout(8), undefined);
     assert.equal(
       harness.values.has(
-        "extensions.zotero.zoterofigure.galleryComparisonLayouts",
+        "extensions.zotero.pasiofigure.galleryComparisonLayouts",
       ),
       false,
       "comparison layouts must not be written to a preference",

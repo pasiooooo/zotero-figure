@@ -30,6 +30,11 @@ if (
   const lock = readJSON("package-lock.json");
   const manifest = readJSON("build/addon/manifest.json");
   const update = readJSON("update.json").addons[config.addonID].updates[0];
+  assert.equal(manifest.applications.zotero.id, config.addonID);
+  assert.equal(manifest.name, config.addonName);
+  assert.deepEqual(Object.keys(readJSON("update.json").addons), [
+    config.addonID,
+  ]);
   for (const actual of [
     lock.version,
     lock.packages[""].version,

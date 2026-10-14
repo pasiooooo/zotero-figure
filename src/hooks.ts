@@ -23,6 +23,7 @@ import {
   setFigureGalleryViewMode,
 } from "./services/results/figureGalleryPreferences";
 import { FigureResultStore } from "./services/results/figureResultStore";
+import { migrateForkData } from "./services/results/migrateForkData";
 import { initLocale } from "./utils/locale";
 
 const controllers = new Map<Window, FigureReaderController>();
@@ -32,6 +33,7 @@ let unregisterShutdownFlush: (() => void) | undefined;
 
 async function onStartup(): Promise<void> {
   await waitForZotero();
+  await migrateForkData();
   initLocale();
   await registerPrefs();
   await loadComparisonLayouts();

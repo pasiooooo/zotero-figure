@@ -158,7 +158,7 @@ export class SidebarResultEditorController {
       if (!this.isCurrentCommentRequest(context, generation, dialog)) return;
       const textarea =
         dialog.window.document.querySelector<HTMLTextAreaElement>(
-          "#zoterofigure-comment-editor",
+          "#pasiofigure-comment-editor",
         );
       textarea?.focus();
       textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
@@ -230,7 +230,7 @@ export class SidebarResultEditorController {
       .setDialogData(dialogData)
       .addCell(0, 0, {
         tag: "div",
-        id: "zoterofigure-region-editor",
+        id: "pasiofigure-region-editor",
       })
       .addButton(this.formatString("sidebar-correct-region-reset"), "reset", {
         noClose: true,
@@ -252,7 +252,7 @@ export class SidebarResultEditorController {
         return;
       }
       const host = dialog.window.document.querySelector<HTMLElement>(
-        "#zoterofigure-region-editor",
+        "#pasiofigure-region-editor",
       );
       if (host) {
         regionEditor = this.installRegionEditor(
@@ -301,11 +301,11 @@ export class SidebarResultEditorController {
   ): Promise<StoredFigureResult | undefined> {
     const context = this.context;
     logLatexEditor(
-      `[Zotero Figure][LaTeX editor] controller request: id=${result.id}, disposed=${this.disposed}, context=${context ? "ready" : "missing"}, latexLength=${result.latex?.length ?? 0}`,
+      `[PDF Figure (pasiooooo)][LaTeX editor] controller request: id=${result.id}, disposed=${this.disposed}, context=${context ? "ready" : "missing"}, latexLength=${result.latex?.length ?? 0}`,
     );
     if (this.disposed || !context || !result.latex) {
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] controller request skipped: id=${result.id}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] controller request skipped: id=${result.id}`,
       );
       return undefined;
     }
@@ -319,7 +319,7 @@ export class SidebarResultEditorController {
     }
     const ownerWindow = this.options.ownerWindow ?? Zotero.getMainWindow();
     logLatexEditor(
-      `[Zotero Figure][LaTeX editor] opening session: id=${result.id}, owner=${this.options.ownerWindow ? "configured-main-window" : "Zotero.getMainWindow"}, openDialog=${typeof ownerWindow?.openDialog}`,
+      `[PDF Figure (pasiooooo)][LaTeX editor] opening session: id=${result.id}, owner=${this.options.ownerWindow ? "configured-main-window" : "Zotero.getMainWindow"}, openDialog=${typeof ownerWindow?.openDialog}`,
     );
     const editor = this.openLatexEditor(ownerWindow, {
       cancelLabel: this.formatString("sidebar-edit-latex-cancel"),
@@ -332,35 +332,35 @@ export class SidebarResultEditorController {
     });
     this.latexEditor = editor;
     logLatexEditor(
-      `[Zotero Figure][LaTeX editor] awaiting editor result: id=${result.id}`,
+      `[PDF Figure (pasiooooo)][LaTeX editor] awaiting editor result: id=${result.id}`,
     );
     try {
       const latex = await editor.result;
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] editor result resolved: id=${result.id}, length=${latex?.length ?? 0}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] editor result resolved: id=${result.id}, length=${latex?.length ?? 0}`,
       );
       if (
         !latex?.trim() ||
         !this.isCurrentLatexRequest(context, generation, editor)
       ) {
         logLatexEditor(
-          `[Zotero Figure][LaTeX editor] editor result ignored: id=${result.id}, current=${this.isCurrentLatexRequest(context, generation, editor)}`,
+          `[PDF Figure (pasiooooo)][LaTeX editor] editor result ignored: id=${result.id}, current=${this.isCurrentLatexRequest(context, generation, editor)}`,
         );
         return undefined;
       }
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] persisting edited value: id=${result.id}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] persisting edited value: id=${result.id}`,
       );
       const updated = await this.options.onEditLatex(edit, latex);
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] persistence completed: id=${result.id}, updated=${Boolean(updated)}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] persistence completed: id=${result.id}, updated=${Boolean(updated)}`,
       );
       return updated && this.isCurrentLatexRequest(context, generation, editor)
         ? updated
         : undefined;
     } finally {
       logLatexEditor(
-        `[Zotero Figure][LaTeX editor] controller cleanup: id=${result.id}`,
+        `[PDF Figure (pasiooooo)][LaTeX editor] controller cleanup: id=${result.id}`,
       );
       if (this.latexEditor === editor) this.latexEditor = undefined;
       editor.close();
@@ -389,7 +389,7 @@ export class SidebarResultEditorController {
       children: [
         {
           tag: "label",
-          attributes: { for: "zoterofigure-comment-editor" },
+          attributes: { for: "pasiofigure-comment-editor" },
           properties: {
             textContent: this.formatString("sidebar-edit-comment-description"),
           },
@@ -401,7 +401,7 @@ export class SidebarResultEditorController {
         },
         {
           tag: "textarea",
-          id: "zoterofigure-comment-editor",
+          id: "pasiofigure-comment-editor",
           attributes: {
             "data-bind": "comment",
             "data-prop": "value",

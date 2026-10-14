@@ -1,7 +1,8 @@
-const LATEX_EDITOR_URL =
-  "chrome://zoterofigure/content/latex-editor/index.html";
-const LATEX_EDITOR_WINDOW_NAME = "zoterofigure-latex-editor";
-const LATEX_EDITOR_LOG_PREFIX = "[Zotero Figure][LaTeX editor]";
+import { config } from "../../../package.json";
+
+const LATEX_EDITOR_URL = `chrome://${config.addonRef}/content/latex-editor/index.html`;
+const LATEX_EDITOR_WINDOW_NAME = `${config.addonRef}-latex-editor`;
+const LATEX_EDITOR_LOG_PREFIX = "[PDF Figure (pasiooooo)][LaTeX editor]";
 
 export interface CodeMirrorLatexEditorOptions {
   cancelLabel: string;

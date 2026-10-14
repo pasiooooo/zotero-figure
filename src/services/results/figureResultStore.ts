@@ -1,3 +1,4 @@
+import { config } from "../../../package.json";
 import {
   createFigureResultRecord,
   getFigureResultFingerprint,
@@ -23,7 +24,7 @@ import type {
 } from "./figureResultManifestCodec";
 import { ImageWriteTransaction } from "./imageWriteTransaction";
 
-const ROOT_DIRECTORY = "zotero-figure/results";
+const ROOT_DIRECTORY = `${config.dataDirectory}/results`;
 const attachmentLocks = new KeyedAsyncMutex<string>();
 
 export const DEFAULT_FIGURE_RESULT_ANALYSIS_IDENTITY: FigureResultAnalysisIdentity =

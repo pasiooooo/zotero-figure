@@ -20,7 +20,7 @@ const WHEEL_SENSITIVITY = 0.0015;
 const MAX_WHEEL_DELTA = 80;
 const POSITION_EPSILON = 0.1;
 const SCALE_EPSILON = 0.0005;
-const PINNED_LATEX_FONT_SIZE_PROPERTY = "--zoterofigure-pinned-latex-font-size";
+const PINNED_LATEX_FONT_SIZE_PROPERTY = "--pasiofigure-pinned-latex-font-size";
 
 export interface PinnedFigureCard {
   fitTo(bounds: Point & Size): void;
@@ -140,7 +140,7 @@ export function preparePinnedFigureCardElement(
     availableWidth,
     sourceGeometry.width > 0 ? sourceGeometry.width : FALLBACK_WIDTH,
   );
-  element.classList.add("zoterofigure-pinned-card");
+  element.classList.add("pasiofigure-pinned-card");
   element.style.left = "0px";
   element.style.top = "0px";
   element.style.transform = "translate3d(0, 0, 0)";
@@ -183,7 +183,7 @@ export function bindPinnedFigureCard(
   const document = element.ownerDocument;
   const root = document.documentElement;
   const baseBounds = element.getBoundingClientRect();
-  const media = element.querySelector<HTMLElement>(".zoterofigure-card-image");
+  const media = element.querySelector<HTMLElement>(".pasiofigure-card-image");
   if (!media) throw new Error("Pinned card image container is missing");
   const initialCardSize: Size = {
     height: baseBounds.height,
@@ -254,7 +254,7 @@ export function bindPinnedFigureCard(
   };
   const pinButton = document.createElement("button");
   pinButton.type = "button";
-  pinButton.className = "zoterofigure-card-menu zoterofigure-card-pin";
+  pinButton.className = "pasiofigure-card-menu pasiofigure-card-pin";
   pinButton.append(createFigureSidebarIcon(document, "pin"));
   const updatePinButton = (): void => {
     const label = getString(
@@ -273,7 +273,7 @@ export function bindPinnedFigureCard(
     onActivate();
   });
   updatePinButton();
-  element.querySelector(".zoterofigure-card-end")?.prepend(pinButton);
+  element.querySelector(".pasiofigure-card-end")?.prepend(pinButton);
 
   const renderTransform = (value: PinnedCardTransform): void => {
     const styles = getPinnedCardRenderStyles(value, baseCardWidth);

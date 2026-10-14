@@ -150,7 +150,7 @@ test("installs the bundled Q8 model from the local chrome resource", async () =>
     assert.equal(validation.state, "valid");
     assert.equal(
       requestedURL,
-      `chrome://zoterofigure/content/${RECOMMENDED_MODEL.embeddedPath}`,
+      `chrome://pasiofigure/content/${RECOMMENDED_MODEL.embeddedPath}`,
     );
     assert.equal(requestCount, 1);
     assert.deepEqual(progressValues, [RECOMMENDED_MODEL.size]);

@@ -1,3 +1,4 @@
+import { config } from "../../../package.json";
 import {
   getFigureResultKind,
   isFigureResultTag,
@@ -8,7 +9,7 @@ import { containsResultRegion } from "../../domain/resultRegion";
 import { throwIfAborted } from "../../utils/cancellation";
 import type { PdfReader } from "./reader";
 
-export const GENERATED_ANNOTATION_AUTHOR = "zoterofigure";
+export const GENERATED_ANNOTATION_AUTHOR = config.addonRef;
 
 export interface ReconcileResult {
   created: number;

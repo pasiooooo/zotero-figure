@@ -53,7 +53,7 @@ sequentially.
 
 ## Gallery comparison persistence
 
-Comparison layouts live in `zotero-figure/comparison-layouts.json` under the
+Comparison layouts live in `zotero-figure-pasiooooo/comparison-layouts.json` under the
 Zotero data directory. Startup loads the file before exposing the gallery API
 and migrates the retired preference only when no file exists. The preference
 is cleared only after its replacement has been written successfully.
@@ -149,7 +149,7 @@ Remote models are disabled. PDF parsing, rendering, and inference remain local.
 The sidebar and gallery use the local result store as their source of truth:
 
 ```text
-<Zotero data>/zotero-figure/results/<libraryID>/<attachmentKey>/
+<Zotero data>/zotero-figure-pasiooooo/results/<libraryID>/<attachmentKey>/
   manifest.json
   images/<resultID>.png
 ```

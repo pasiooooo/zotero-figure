@@ -26,7 +26,7 @@ export function createFigureSidebarIcon(
     kind === "annotation" ? "0 0 16 16" : "0 0 24 24",
   );
   svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("zoterofigure-svg-icon", `zoterofigure-icon-${kind}`);
+  svg.classList.add("pasiofigure-svg-icon", `pasiofigure-icon-${kind}`);
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
   svg.setAttribute("stroke-width", "2");
@@ -56,7 +56,7 @@ export function createPluginIcon(
 
 export function createNativeNoteIcon(document: Document): SVGSVGElement {
   const icon = document.createElementNS(SVG_NAMESPACE, "svg");
-  icon.classList.add("zoterofigure-native-note-icon");
+  icon.classList.add("pasiofigure-native-note-icon");
   icon.setAttribute("viewBox", "0 0 20 20");
   icon.setAttribute("fill", "none");
   icon.setAttribute("aria-hidden", "true");

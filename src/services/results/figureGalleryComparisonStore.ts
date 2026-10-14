@@ -1,8 +1,9 @@
+import { config } from "../../../package.json";
 import { clearPref, getPref } from "../../utils/prefs";
 
 export type StoredComparisonLayouts = Record<string, unknown>;
 
-const STORE_DIRECTORY = "zotero-figure";
+const STORE_DIRECTORY = config.dataDirectory;
 const STORE_FILE = "comparison-layouts.json";
 const FLUSH_DELAY_MS = 500;
 

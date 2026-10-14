@@ -16,6 +16,7 @@ function createZToolkit() {
 
 function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
   const env = __env__;
+  _ztoolkit.basicOptions.api.pluginID = config.addonID;
   _ztoolkit.basicOptions.log.prefix = `[${config.addonName}]`;
   _ztoolkit.basicOptions.log.disableConsole = env === "production";
   _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = false;

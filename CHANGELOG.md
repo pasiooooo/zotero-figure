@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.1] - 2026-10-14
+
+### 插件身份与更新隔离
+
+- 显示名称改为 **PDF Figure (pasiooooo)**，插件安装 ID 改为 `zotero-figure@pasiooooo.github.io`，防止被识别为上游插件。
+- 资源命名空间、Zotero 全局实例、偏好设置前缀、侧栏与窗口标识、拖拽数据类型及生成批注作者标记全部使用本分支独立标识。
+- 自动更新仍指向 `pasiooooo/zotero-figure` 的最新 Release；更新清单只包含新插件 ID，发布检查会核对安装包 ID、清单 ID、版本和下载地址。
+- 结果、对比布局和模型改用 `zotero-figure-pasiooooo` 数据目录。首次启动从旧目录复制一次数据和设置，不删除原数据、不覆盖已有分支数据；复制失败不会启用不完整副本，可在重启时重试。
+- 本分支不再把上游生成的批注当作自己的批注修改或删除。
+- 设置页面与 Library 显示本分支身份，项目链接指向当前仓库，同时保留上游作者归属。
+
+### 安装注意
+
+**插件 ID 已改变，旧版不能自动跨 ID 更新。请先停用原插件或 1.1.0，再手动安装一次本版 XPI，并重启 Zotero。** 数据复制需要额外磁盘空间；首次迁移时请保持旧插件停用。原目录与设置保留，此后两个插件各自保存数据，不会双向同步。
+
+### English summary
+
+- Give this fork its own installation ID, runtime and preference namespaces, UI identifiers, annotation ownership, and local storage.
+- Keep updates on this repository and verify the package and update manifest identities before publishing.
+- Copy legacy data/settings once without deleting originals or overwriting existing fork data. Disable the old plugin and manually install this release once because the add-on ID changed.
+
 ## [1.1.0] - 2026-10-14
 
 ### 新增

@@ -137,9 +137,9 @@ function floatingCard(document = new DocumentStub()) {
   document.frames.push(frame);
   const element = document.createElement("article");
   const media = document.createElement("div");
-  media.className = "zoterofigure-card-image";
+  media.className = "pasiofigure-card-image";
   const menu = document.createElement("div");
-  menu.className = "zoterofigure-card-end";
+  menu.className = "pasiofigure-card-end";
   element.append(media);
   element.append(menu);
   const timers = new Map<number, () => void>();

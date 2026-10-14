@@ -1,8 +1,10 @@
-# Zotero Figure
+# PDF Figure (pasiooooo)
 
 在 Zotero 中提取 PDF 里的图、表和公式。
 
-本分支基于 [MuiseDestiny/zotero-figure](https://github.com/MuiseDestiny/zotero-figure)。1.1.0 的完整改动见[更新日志](../CHANGELOG.md)，标签自动发布流程见[发布说明](RELEASING.md)。
+本分支基于 [MuiseDestiny/zotero-figure](https://github.com/MuiseDestiny/zotero-figure)。完整改动见[更新日志](../CHANGELOG.md)，标签自动发布流程见[发布说明](RELEASING.md)。
+
+**从原插件或本分支 1.1.0 升级：** 请先停用旧插件，手动安装一次 1.1.1 或更新版本，然后重启 Zotero。新插件 ID 为 `zotero-figure@pasiooooo.github.io`，无法跨 ID 自动更新。首次启动会把旧解析结果、对比布局、模型和设置复制到独立目录，保留原数据；请预留复制所需的磁盘空间，并在首次迁移时保持旧插件停用。此后两个插件的数据独立保存。
 
 [English](../README.md) | [简体中文](README.zh-CN.md) | [Italiano](README.it-IT.md) | [Русский](README.ru-RU.md) | [日本語](README.ja-JP.md) | [Español](README.es-ES.md)
 
@@ -15,7 +17,7 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 - 复制、保存或贴出图片，修改说明，或在按 PDF 页面比例调整的窗口中校正裁图区域；跳转到 PDF 页面，添加到笔记或删除结果。
 - 在 PDF 阅读器中右键选中的图片标注，可将其添加到本地图表解析结果；已有的 Figure、Table 或 Formula 标签会保留。
 - 在“PDF 图表库”中集中浏览多篇文献的结果，并按文献、年份、分类、类型和说明关键词筛选。可在自动记忆的瀑布流与文献分栏间切换；在文献分栏中按稳定页码顺序显示结果，并对齐到可选命名的对比行。拖动文献表头可调整列顺序，拖动同一文献中的图片卡片可调整行位置，也可右键图片将其加入对比分组。同一文献在一个分组中包含多张图片时，单元格会显示主图和左侧缩略图；点击缩略图即可将其切换为主图。解散分组可删除对应的对比行，工具栏缩放控件可统一调整全部预览大小。
-- 对比布局保存在 Zotero 数据目录内的 `zotero-figure/comparison-layouts.json`，支持大型对比表。旧布局会自动迁移；备份时请包含此文件。布局不通过 Zotero Sync 同步。
+- 对比布局保存在 Zotero 数据目录内的 `zotero-figure-pasiooooo/comparison-layouts.json`，支持大型对比表。旧布局会自动迁移；备份时请包含此文件。布局不通过 Zotero Sync 同步。
 - 批量分析选中的文献条目或 PDF 附件，并可将结果写入笔记或 Zotero 标注。
 - 安装 Zotero PDF Translate 后翻译结果说明。
 - 可选通过 SiliconFlow `Qwen/Qwen3.6-35B-A3B` 识别公式 LaTeX，在本机使用 KaTeX 渲染，并可复制、重新识别，或通过 CodeMirror 源码编辑器和 KaTeX 实时预览修改源码。
@@ -44,7 +46,7 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 - **区域补识别：** 点击 Figure 侧栏的“框选区域识别”，立即进入截图式选区界面；在 PDF 单页内拖动框选，松开后识别，Esc 或右键取消。有图注时可一并框入。图、表缺少图注时，会额外检测一次本页来补充图注上下文，不导入框外图表。图注文字取自 PDF 文本层，扫描图注暂不进行 OCR。区域识别只保存本地结果，不创建 Zotero 批注。已有结果卡片也可右键“重新识别此区域”。仅替换完全落在框内的旧结果，框外结果不变；未检出内容时保留原结果。
 - **图表库：** 打开“工具 > PDF 图表库”，集中浏览不同文献的结果；双击卡片可打开源 PDF。
 - **图表库缩放：** 按住 Ctrl（Windows/Linux）或 Command（macOS）滚动鼠标滚轮，或按 `+`/`-`，以 10% 为步长调整图片大小（50%–200%）。最大化 Library 窗口同样支持，缩放比例与工具栏滑块同步。
-- **批量处理：** 在文库中选中文献条目或 PDF 附件，右键打开 `PDF Figure >`，可进行分析、写入笔记或创建标注。选中图片标注后选择“添加到 Figure”即可批量导入。
+- **批量处理：** 在文库中选中文献条目或 PDF 附件，右键打开 `PDF Figure (pasiooooo) >`，可进行分析、写入笔记或创建标注。选中图片标注后选择“添加到 Figure”即可批量导入。
   开始前会列出已有解析记录的 PDF，可选择重新分析并覆盖、跳过这些 PDF 并继续处理其余文件，或取消整批任务。解析成功但未找到结果的 PDF 也会记为已解析。
 - **设置：** 打开 PDF Figure 设置页，可管理内置模型、标注同步和 SiliconFlow 公式 OCR，也可直接打开图表库；使用“转换已有公式”可处理所有文库中尚未缓存的公式。
 

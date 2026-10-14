@@ -524,10 +524,10 @@ class FakeDialogDocument {
   public readonly textarea = new FakeTextarea();
 
   public querySelector(selector: string): HTMLElement | null {
-    if (selector === "#zoterofigure-comment-editor") {
+    if (selector === "#pasiofigure-comment-editor") {
       return this.textarea as unknown as HTMLElement;
     }
-    if (selector === "#zoterofigure-region-editor") return this.host;
+    if (selector === "#pasiofigure-region-editor") return this.host;
     return null;
   }
 }

@@ -27,7 +27,7 @@ export class FigureOutputService {
       if (attachment.parentID) note.parentID = attachment.parentID;
       await note.saveTx({ skipSelect: true });
       const html: string[] = [
-        '<div class="zotero-figure-note" data-citation-items="%5B%5D" data-schema-version="9">',
+        '<div class="pasiofigure-note" data-citation-items="%5B%5D" data-schema-version="9">',
         `<h2>${escapeHTML(getString("note-title"))}</h2>`,
       ];
       const attachmentURI = String(Zotero.URI.getItemURI(attachment));

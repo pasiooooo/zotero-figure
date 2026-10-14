@@ -45,41 +45,41 @@ const controllerSource = readFileSync(
 );
 
 test("uses Zotero's sidebar scroller with one sticky controls header", () => {
-  const wrapper = getRule("#zoterofigure-sidebar-panel");
-  const panel = getRule(".zoterofigure-sidebar-panel");
-  const controls = getRule(".zoterofigure-sidebar-controls");
-  const actions = getRule(".zoterofigure-sidebar-actions");
-  const filters = getRule(".zoterofigure-sidebar-filters");
-  const filterSlot = getRule(".zoterofigure-sidebar-filter-slot");
-  const filterButton = getRule(".zoterofigure-sidebar-filter");
-  const hoveredFilter = getRule(".zoterofigure-sidebar-filter:hover");
-  const filterIcon = getRule(".zoterofigure-sidebar-filter-icon");
-  const selectedFilter = getRule(".zoterofigure-sidebar-filter.selected");
-  const list = getRule(".zoterofigure-sidebar-list");
-  const cardHeader = getRule(".zoterofigure-sidebar-card > header");
-  const focusedCard = getRule(".zoterofigure-sidebar-card:focus");
-  const cardPage = getRule(".zoterofigure-card-page");
-  const cardImage = getExactRule(".zoterofigure-card-image");
-  const latexCardImage = getExactRule(".zoterofigure-card-image.is-latex");
-  const cardImageElement = getExactRule(".zoterofigure-card-image img");
-  const renderedLatex = getExactRule(".zoterofigure-rendered-latex");
-  const cardComment = getExactRule(".zoterofigure-card-comment");
-  const cardCommentText = getExactRule(".zoterofigure-card-comment-text");
+  const wrapper = getRule("#pasiofigure-sidebar-panel");
+  const panel = getRule(".pasiofigure-sidebar-panel");
+  const controls = getRule(".pasiofigure-sidebar-controls");
+  const actions = getRule(".pasiofigure-sidebar-actions");
+  const filters = getRule(".pasiofigure-sidebar-filters");
+  const filterSlot = getRule(".pasiofigure-sidebar-filter-slot");
+  const filterButton = getRule(".pasiofigure-sidebar-filter");
+  const hoveredFilter = getRule(".pasiofigure-sidebar-filter:hover");
+  const filterIcon = getRule(".pasiofigure-sidebar-filter-icon");
+  const selectedFilter = getRule(".pasiofigure-sidebar-filter.selected");
+  const list = getRule(".pasiofigure-sidebar-list");
+  const cardHeader = getRule(".pasiofigure-sidebar-card > header");
+  const focusedCard = getRule(".pasiofigure-sidebar-card:focus");
+  const cardPage = getRule(".pasiofigure-card-page");
+  const cardImage = getExactRule(".pasiofigure-card-image");
+  const latexCardImage = getExactRule(".pasiofigure-card-image.is-latex");
+  const cardImageElement = getExactRule(".pasiofigure-card-image img");
+  const renderedLatex = getExactRule(".pasiofigure-rendered-latex");
+  const cardComment = getExactRule(".pasiofigure-card-comment");
+  const cardCommentText = getExactRule(".pasiofigure-card-comment-text");
   const expandedCardComment = getExactRule(
-    ".zoterofigure-card-comment.expanded",
+    ".pasiofigure-card-comment.expanded",
   );
   const expandedCardCommentText = getExactRule(
-    ".zoterofigure-card-comment.expanded .zoterofigure-card-comment-text",
+    ".pasiofigure-card-comment.expanded .pasiofigure-card-comment-text",
   );
   const pinnedLatex = getRule(
-    ".zoterofigure-pinned-card .zoterofigure-card-image.is-latex",
+    ".pasiofigure-pinned-card .pasiofigure-card-image.is-latex",
   );
-  const noteIcon = getRule(".zoterofigure-native-note-icon");
-  const analysisAction = getRule(".zoterofigure-analysis-action");
-  const analysisIcon = getRule(".zoterofigure-analysis-plugin-icon");
-  const emptyAnalysisAction = getRule(".zoterofigure-sidebar-empty-action");
+  const noteIcon = getRule(".pasiofigure-native-note-icon");
+  const analysisAction = getRule(".pasiofigure-analysis-action");
+  const analysisIcon = getRule(".pasiofigure-analysis-plugin-icon");
+  const emptyAnalysisAction = getRule(".pasiofigure-sidebar-empty-action");
   const magnifier = getRule(
-    ".zoterofigure-analysis-action .zoterofigure-analysis-magnifier",
+    ".pasiofigure-analysis-action .pasiofigure-analysis-magnifier",
   );
 
   assert.match(wrapper, /display\s*:\s*block/);
@@ -104,7 +104,7 @@ test("uses Zotero's sidebar scroller with one sticky controls header", () => {
   assert.match(filterSlot, /position\s*:\s*relative/);
   assert.match(filterSlot, /width\s*:\s*max-content/);
   assert.doesNotMatch(filterSlot, /width\s*:\s*\d+px/);
-  assert.match(filterButton, /--zoterofigure-filter-accent/);
+  assert.match(filterButton, /--pasiofigure-filter-accent/);
   assert.match(
     filterButton,
     /background\s*:\s*var\(--material-mix-quarternary\)/,
@@ -118,9 +118,9 @@ test("uses Zotero's sidebar scroller with one sticky controls header", () => {
   assert.match(filterButton, /padding\s*:\s*1px 5px/);
   assert.match(filterButton, /width\s*:\s*100%/);
   assert.match(filterIcon, /background\s*:\s*transparent/);
-  assert.match(filterIcon, /color\s*:\s*var\(--zoterofigure-filter-accent\)/);
+  assert.match(filterIcon, /color\s*:\s*var\(--pasiofigure-filter-accent\)/);
   assert.match(selectedFilter, /background\s*:\s*color-mix/);
-  assert.match(selectedFilter, /--zoterofigure-filter-accent\) 12%/);
+  assert.match(selectedFilter, /--pasiofigure-filter-accent\) 12%/);
   assert.match(selectedFilter, /border-color\s*:\s*color-mix/);
   assert.match(hoveredFilter, /background\s*:\s*color-mix/);
   assert.match(hoveredFilter, /--material-mix-quarternary\) 92%/);
@@ -143,7 +143,7 @@ test("uses Zotero's sidebar scroller with one sticky controls header", () => {
   assert.match(cardImageElement, /width\s*:\s*100%\s*!important/);
   assert.match(
     pinnedLatex,
-    /font-size\s*:\s*var\(--zoterofigure-pinned-latex-font-size, 1em\)/,
+    /font-size\s*:\s*var\(--pasiofigure-pinned-latex-font-size, 1em\)/,
   );
   assert.match(cardComment, /align-items\s*:\s*center/);
   assert.match(cardComment, /max-height\s*:\s*calc\(1\.35em \+ 15px\)/);
@@ -184,13 +184,10 @@ test("uses Zotero's sidebar scroller with one sticky controls header", () => {
   assert.match(magnifier, /width\s*:\s*12px/);
   assert.match(
     magnifier,
-    /animation\s*:\s*zoterofigure-inspect 2600ms ease-in-out infinite/,
+    /animation\s*:\s*pasiofigure-inspect 2600ms ease-in-out infinite/,
   );
-  assert.doesNotMatch(
-    css,
-    /zoterofigure-analysis-plugin-icon\s*\{[^}]*opacity/,
-  );
-  assert.match(css, /@keyframes zoterofigure-inspect/);
+  assert.doesNotMatch(css, /pasiofigure-analysis-plugin-icon\s*\{[^}]*opacity/);
+  assert.match(css, /@keyframes pasiofigure-inspect/);
   assert.match(css, /17%\s*\{[^}]*translate\(3px, -2px\)/);
   assert.match(css, /39%\s*\{[^}]*translate\(1px, 2px\)/);
   assert.match(css, /63%\s*\{[^}]*translate\(5px, 1px\)/);
@@ -225,9 +222,9 @@ test("renders reader analysis progress inside the sidebar", () => {
     "  private async runAnalysis(",
     "  private cancelAnalysis(",
   );
-  const progress = getRule(".zoterofigure-analysis-progress");
-  const progressTrack = getRule(".zoterofigure-analysis-progress-track");
-  const progressDetail = getRule(".zoterofigure-analysis-progress-detail");
+  const progress = getRule(".pasiofigure-analysis-progress");
+  const progressTrack = getRule(".pasiofigure-analysis-progress-track");
+  const progressDetail = getRule(".pasiofigure-analysis-progress-detail");
 
   assert.doesNotMatch(runAnalysis, /this\.createProgress\(/);
   assert.match(runAnalysis, /panel\?\.updateAnalysisProgress\(/);
@@ -271,13 +268,13 @@ test("navigates hover result menus without rebuilding the active filter", () => 
     "  private createCard(",
     "  private createCardStart(",
   );
-  const filters = getRule(".zoterofigure-sidebar-filters");
-  const filterSlot = getRule(".zoterofigure-sidebar-filter-slot");
-  const popover = getRule(".zoterofigure-filter-results");
-  const result = getRule(".zoterofigure-filter-result");
-  const hoveredResult = getRule(".zoterofigure-filter-result:focus-visible");
-  const resultLabel = getRule(".zoterofigure-filter-result-label");
-  const resultPage = getRule(".zoterofigure-filter-result-page");
+  const filters = getRule(".pasiofigure-sidebar-filters");
+  const filterSlot = getRule(".pasiofigure-sidebar-filter-slot");
+  const popover = getRule(".pasiofigure-filter-results");
+  const result = getRule(".pasiofigure-filter-result");
+  const hoveredResult = getRule(".pasiofigure-filter-result:focus-visible");
+  const resultLabel = getRule(".pasiofigure-filter-result-label");
+  const resultPage = getRule(".pasiofigure-filter-result-page");
 
   assert.match(createFilters, /filterAndSortFigureSidebarItems\(/);
   assert.match(createFilters, /"figure", "table", "formula"/);
@@ -434,7 +431,7 @@ test("pins a complete card with an independent image URL", () => {
     "  private createMenuButton(",
   );
   const pinnedCard = getRule(
-    ".zoterofigure-sidebar-card.zoterofigure-pinned-card",
+    ".pasiofigure-sidebar-card.pasiofigure-pinned-card",
   );
 
   assert.match(createCard, /media\.addEventListener\("dblclick"/);
@@ -543,7 +540,7 @@ test("pins a complete card with an independent image URL", () => {
   assert.doesNotMatch(applyPinnedCardSnapshot, /element\.replaceWith/);
   assert.match(
     openMenu,
-    /\.zoterofigure-sidebar-card:not\(\.zoterofigure-pinned-card\)/,
+    /\.pasiofigure-sidebar-card:not\(\.pasiofigure-pinned-card\)/,
   );
   assert.match(openMenu, /"sidebar-pin-image"/);
   assert.match(openMenu, /return this\.pinSelectedCards\(result, sourceCard\)/);
@@ -580,10 +577,6 @@ test("pins a complete card with an independent image URL", () => {
   assert.match(resultEditorSource, /openCodeMirrorLatexEditor/);
   assert.match(resultEditorSource, /latexEditor\?\.close/);
   assert.doesNotMatch(resultEditorSource, /"data-bind": "latex"/);
-  assert.match(
-    codeMirrorLatexEditorSource,
-    /chrome:\/\/zoterofigure\/content\/latex-editor\/index\.html/,
-  );
   assert.doesNotMatch(codeMirrorLatexEditorSource, /chrome:\/\/scaffold/);
   assert.match(codeMirrorLatexEditorSource, /dialogData/);
   assert.match(codeMirrorLatexEditorSource, /settle\(undefined\)/);
@@ -635,9 +628,9 @@ test("pins a complete card with an independent image URL", () => {
   assert.doesNotMatch(pinnedCard, /transform-origin/);
   assert.doesNotMatch(
     css,
-    /zoterofigure-pinned-card[^}]*pointer-events\s*:\s*none/,
+    /pasiofigure-pinned-card[^}]*pointer-events\s*:\s*none/,
   );
-  assert.doesNotMatch(css, /zoterofigure-pinned-card:focus-visible/);
+  assert.doesNotMatch(css, /pasiofigure-pinned-card:focus-visible/);
 });
 
 test("clears the sidebar before local files without touching annotation mirrors", () => {
@@ -714,9 +707,9 @@ test("loads local previews lazily through revocable blob URLs", () => {
   assert.match(sidebarImageLoadSource, /classList\.add\("is-loaded"\)/);
   assert.match(
     css,
-    /\.zoterofigure-card-image\.is-loaded\s*\{[^}]*min-height\s*:\s*0/,
+    /\.pasiofigure-card-image\.is-loaded\s*\{[^}]*min-height\s*:\s*0/,
   );
-  const loadedImage = getRule(".zoterofigure-card-image img");
+  const loadedImage = getRule(".pasiofigure-card-image img");
   assert.match(loadedImage, /border\s*:\s*0\s*!important/);
   assert.match(loadedImage, /margin\s*:\s*0\s*!important/);
   assert.match(loadedImage, /padding\s*:\s*0\s*!important/);

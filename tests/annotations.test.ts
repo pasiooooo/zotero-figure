@@ -12,6 +12,10 @@ import type { PdfReader } from "../src/platform/zotero/reader";
 test("identifies generated annotations by both author and tag", () => {
   assert.equal(
     isGeneratedResultAnnotation(annotation("zoterofigure", "Figure 2")),
+    false,
+  );
+  assert.equal(
+    isGeneratedResultAnnotation(annotation("pasiofigure", "Figure 2")),
     true,
   );
   assert.equal(
@@ -19,11 +23,11 @@ test("identifies generated annotations by both author and tag", () => {
     false,
   );
   assert.equal(
-    isGeneratedResultAnnotation(annotation("zoterofigure", "Important")),
+    isGeneratedResultAnnotation(annotation("pasiofigure", "Important")),
     false,
   );
   assert.equal(
-    isGeneratedResultAnnotation(annotation("zoterofigure", "Formula 7")),
+    isGeneratedResultAnnotation(annotation("pasiofigure", "Formula 7")),
     true,
   );
 });
@@ -41,6 +45,26 @@ test("rejects annotation candidates without a generated result tag", async () =>
       /invalid result tag/,
     );
     assert.equal(harness.created.length, 0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("replacement does not delete or claim upstream annotations", async () => {
+  const candidate = makeCandidate("Figure 1", "Figure 1. Caption");
+  const existing = makeExistingAnnotation(candidate);
+  existing.item.annotationAuthorName = "zoterofigure";
+  const harness = installZoteroHarness();
+  try {
+    const result = await reconcileGeneratedAnnotations(
+      makeReader([existing.item]),
+      0,
+      [candidate],
+      "replace-page",
+    );
+    assert.equal(existing.erased, false);
+    assert.equal(result.created, 1);
+    assert.equal(result.removed, 0);
   } finally {
     harness.restore();
   }
@@ -100,7 +124,7 @@ test("updates an existing generated annotation after a manual caption edit", asy
   const candidate = makeCandidate("Figure 1", "Figure 1. Corrected caption");
   let saves = 0;
   const annotation = {
-    annotationAuthorName: "zoterofigure",
+    annotationAuthorName: "pasiofigure",
     annotationComment: "Figure 1. Detected caption",
     annotationPosition: JSON.stringify({
       pageIndex: candidate.pageIndex,
@@ -132,7 +156,7 @@ test("updates an existing generated annotation after a region correction", async
   };
   let saves = 0;
   const existing = {
-    annotationAuthorName: "zoterofigure",
+    annotationAuthorName: "pasiofigure",
     annotationComment: previous.comment,
     annotationPosition: JSON.stringify({
       pageIndex: previous.pageIndex,
@@ -315,7 +339,7 @@ function makeExistingAnnotation(candidate: AnnotationCandidate): {
     item: undefined as unknown as Zotero.Item,
   };
   state.item = {
-    annotationAuthorName: "zoterofigure",
+    annotationAuthorName: "pasiofigure",
     annotationComment: candidate.comment,
     annotationPosition: JSON.stringify({
       pageIndex: candidate.pageIndex,
