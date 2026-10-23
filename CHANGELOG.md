@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.3] - 2026-10-23
+
+### 右键菜单与批注标签
+
+- Figure 侧栏和 Library 右键菜单按用途分区，操作项使用主题自适应 SVG 图标；侧栏的编辑、识别及选择操作收进子菜单，单项与多选分别显示另存为或批量导出，删除单独置底。
+- 新生成的 Zotero 批注仅使用 `figure`、`table`、`formula` 类别标签，不再生成带序号的标签。兼容旧的编号标签，去重、图注修改、区域修正、删除及批注导入仍可关联对应结果。
+
+### 选中结果转换为 Zotero 标注
+
+- 阅读器 Figure 侧栏和 Library 的结果右键菜单增加“将所选结果转换为 Zotero 标注”，支持单项、Ctrl / Command 多选及 Shift 连续选择，适用于图片、公式和表格。
+- 部分转换仅补充选中结果的标注，跳过已有标注，保留同页未选中的标注与本地结果；只读附件和单项失败会报告错误，其余选中项继续处理。
+
+### English summary
+
+- Convert a single result or selected figures, tables, and formulas to Zotero annotations from the Reader sidebar and Library context menus. Skip existing annotations and preserve unselected annotations and local results.
+- Group context-menu actions by purpose, add SVG icons that follow the menu text color, move editing and selection actions into submenus, and keep deletion at the bottom.
+- Use only `figure`, `table`, or `formula` tags for newly generated annotations. Continue recognizing legacy numbered tags for duplicate checks, caption and crop updates, deletion, and annotation imports; existing tags are not bulk migrated.
+
 ## [1.1.2] - 2026-10-14
 
 ### Library 排布与比较性能

@@ -42,6 +42,8 @@ export interface FigureGalleryImage {
   mimeType: "image/png";
 }
 
+export type FigureGalleryBatchAction = "delete" | "export" | "annotations";
+
 export interface FigureGalleryBatchResult {
   completedIDs: string[];
   errors: string[];

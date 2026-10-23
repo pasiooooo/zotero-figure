@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { transformSync } from "esbuild";
+import type { FigureGalleryBatchAction } from "../src/domain/figureGallery";
 
 const source = readFileSync(
   "src/features/gallery/figureGalleryView.ts",
@@ -113,7 +114,7 @@ function createView() {
     view,
   ) as {
     updateSelectionControls(): void;
-    runSelectedBatch(action: "delete" | "export"): Promise<void>;
+    runSelectedBatch(action: FigureGalleryBatchAction): Promise<void>;
     selectGalleryEntry(id: string, modifiers: typeof plain): void;
     selectAllGalleryEntries(): void;
     handleGallerySelectionKeydown(event: unknown): void;
@@ -269,6 +270,19 @@ test("export preserves cards and selection", async () => {
   assert.ok(view.selectedEntryIDs.has("one"));
 });
 
+test("annotation conversion submits only selected IDs and preserves cards and selection", async () => {
+  const { view, api, calls, confirmations } = createView();
+  api.selectGalleryEntry("one", plain);
+  api.selectGalleryEntry("two", { ...plain, ctrlKey: true });
+  await api.runSelectedBatch("annotations");
+  assert.deepEqual(Array.from(calls[0]), ["one", "two"]);
+  assert.equal(view.allEntries.length, 3);
+  assert.deepEqual([...view.selectedEntryIDs], ["one", "two"]);
+  assert.deepEqual(confirmations, []);
+  assert.equal(view.batchBusy, false);
+  assert.equal(view.controlsDisabled, false);
+});
+
 test("batch actions live in the native context menu without checkbox or top toolbar markup", () => {
   const markup = readFileSync(
     "addon/chrome/content/gallery/index.html",
@@ -285,6 +299,7 @@ test("batch actions live in the native context menu without checkbox or top tool
   );
   assert.match(menu, /runSelectedBatch\("export"\)/);
   assert.match(menu, /runSelectedBatch\("delete"\)/);
+  assert.match(menu, /runSelectedBatch\("annotations"\)/);
   assert.match(menu, /selectAllGalleryEntries/);
   assert.match(menu, /clearGallerySelection/);
 });

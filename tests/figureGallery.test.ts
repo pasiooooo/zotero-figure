@@ -1073,6 +1073,7 @@ test("builds a library snapshot without exposing local image paths", async () =>
     listIndexedAttachmentKeys: async () => ["ATTACHMENT", "MISSING"],
   };
   const platform: FigureGalleryPlatform = {
+    addAnnotation: async () => undefined,
     chooseExportDirectory: async () => false,
     exportImage: async () => undefined,
     removeAnnotation: async () => undefined,
@@ -1138,6 +1139,7 @@ test("rejects unavailable libraries and stale result IDs", async () => {
     },
     {
       chooseExportDirectory: async () => false,
+      addAnnotation: async () => undefined,
       exportImage: async () => undefined,
       removeAnnotation: async () => undefined,
       getAttachment: async () => false,
@@ -1298,6 +1300,113 @@ test("bounds retained sources to the latest snapshot of each loaded library", as
     (await index.readImage(secondLibrary.entries[0].id)).base64,
     "L2ltYWdlcy90d28ucG5n",
   );
+});
+
+test("selected annotation conversion uses current results, deduplicates IDs and continues across PDFs after failures", async () => {
+  const figure = storedGalleryResult("figure", "/figure.png");
+  const formula = {
+    ...storedGalleryResult("formula", "/formula.png"),
+    kind: "formula" as const,
+    tag: "Formula 1",
+  };
+  const table = {
+    ...storedGalleryResult("table", "/table.png"),
+    kind: "table" as const,
+    tag: "Table 1",
+  };
+  const hidden = storedGalleryResult("hidden", "/hidden.png");
+  const deleted = storedGalleryResult("deleted", "/deleted.png");
+  const results = new Map<number, StoredFigureResult[]>([
+    [1, [figure, formula, hidden, deleted]],
+    [2, [table]],
+  ]);
+  const platform = galleryPlatform([
+    galleryAttachment(1, "ONE"),
+    galleryAttachment(2, "TWO"),
+  ]);
+  const converted: string[][] = [];
+  platform.addAnnotation = async (attachment, result) => {
+    if (result.kind === "formula") throw new Error("annotation save failed");
+    converted.push([attachment.key, result.id, result.comment]);
+  };
+  let reads = 0;
+  const index = new FigureGalleryIndex(
+    {
+      list: async (attachment) => {
+        reads++;
+        return results.get(attachment.libraryID)!;
+      },
+      listIndexedAttachmentKeys: async (id) => [id === 1 ? "ONE" : "TWO"],
+      remove: async () => assert.fail("conversion must not remove results"),
+    },
+    platform,
+  );
+  await index.loadLibrary(1);
+  await index.loadLibrary(2);
+  reads = 0;
+  results.set(1, [{ ...figure, comment: "Updated caption" }, formula, hidden]);
+  const outcome = await index.runBatch(
+    [
+      "1:ONE:figure",
+      "1:ONE:figure",
+      "1:ONE:formula",
+      "1:ONE:deleted",
+      "stale",
+      "2:TWO:table",
+    ],
+    "annotations",
+  );
+  assert.deepEqual(outcome?.completedIDs, ["1:ONE:figure", "2:TWO:table"]);
+  assert.equal(outcome?.errors.length, 3);
+  assert.match(outcome!.errors.join("\n"), /annotation save failed/);
+  assert.match(outcome!.errors.join("\n"), /no longer available/);
+  assert.match(outcome!.errors.join("\n"), /no longer indexed/);
+  assert.deepEqual(converted, [
+    ["ONE", "figure", "Updated caption"],
+    ["TWO", "table", "table"],
+  ]);
+  assert.equal(reads, 2);
+  await index.readImage("1:ONE:figure");
+  await index.readImage("1:ONE:hidden");
+});
+
+test("sidebar annotation conversion supports a single selected result and rejects read-only attachments", async () => {
+  const attachment = galleryAttachment(1, "ONE");
+  let writable = false;
+  attachment.isEditable = () => writable;
+  const results = [
+    storedGalleryResult("selected", "/selected.png"),
+    storedGalleryResult("other", "/other.png"),
+  ];
+  const platform = galleryPlatform([attachment]);
+  const converted: string[] = [];
+  platform.addAnnotation = async (_attachment, result) => {
+    converted.push(result.id);
+  };
+  const index = new FigureGalleryIndex(
+    {
+      list: async () => results,
+      listIndexedAttachmentKeys: async () => ["ONE"],
+      remove: async () => assert.fail("conversion must not remove results"),
+    },
+    platform,
+  );
+  const denied = await index.runAttachmentBatch(
+    attachment,
+    ["selected"],
+    "annotations",
+  );
+  assert.deepEqual(denied?.completedIDs, []);
+  assert.match(denied!.errors[0], /read-only/);
+  assert.deepEqual(converted, []);
+  writable = true;
+  const outcome = await index.runAttachmentBatch(
+    attachment,
+    ["selected"],
+    "annotations",
+  );
+  assert.deepEqual(outcome, { completedIDs: ["selected"], errors: [] });
+  assert.deepEqual(converted, ["selected"]);
 });
 
 test("batch deletion deduplicates IDs, continues on failure, and invalidates only removed sources", async () => {
@@ -1524,6 +1633,7 @@ function galleryPlatform(
   attachments: readonly Zotero.Item[],
 ): FigureGalleryPlatform {
   return {
+    addAnnotation: async () => undefined,
     chooseExportDirectory: async () => false,
     exportImage: async () => undefined,
     removeAnnotation: async () => undefined,

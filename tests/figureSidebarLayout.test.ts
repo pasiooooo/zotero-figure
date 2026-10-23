@@ -548,13 +548,15 @@ test("pins a complete card with an independent image URL", () => {
     openMenu.indexOf("if (!sourceCard || this.selectedResultIDs.size === 1)"),
   );
   assert.ok(
-    singleMenu.indexOf('"sidebar-save-image"') <
+    singleMenu.indexOf('"sidebar-go-to-page"') <
       singleMenu.indexOf('"sidebar-pin-image"'),
   );
   assert.ok(
     singleMenu.indexOf('"sidebar-pin-image"') <
-      singleMenu.indexOf('"sidebar-go-to-page"'),
+      singleMenu.indexOf('"sidebar-save-image"'),
   );
+  assert.match(openMenu, /appendSubmenu\(menu, "result-menu-edit", "edit"\)/);
+  assert.match(openMenu, /"result-menu-selection"/);
   assert.match(openMenu, /"sidebar-edit-comment"/);
   assert.match(openMenu, /this\.openCommentEditor\(result\)/);
   assert.match(openMenu, /"sidebar-correct-region"/);

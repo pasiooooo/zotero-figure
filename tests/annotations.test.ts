@@ -2,12 +2,16 @@ import * as assert from "node:assert/strict";
 import test from "node:test";
 import type { AnnotationCandidate } from "../src/domain/layout";
 import {
+  getGeneratedAnnotationKind,
+  getImageAnnotationCandidate,
   isGeneratedResultAnnotation,
   reconcileGeneratedAnnotations,
+  removeGeneratedAnnotationForCandidate,
   updateGeneratedAnnotationCommentForCandidate,
   updateGeneratedAnnotationPositionForCandidate,
 } from "../src/platform/zotero/annotations";
 import type { PdfReader } from "../src/platform/zotero/reader";
+import { createZoteroFigureGalleryPlatform } from "../src/platform/zotero/figureGallery";
 
 test("identifies generated annotations by both author and tag", () => {
   assert.equal(
@@ -30,6 +34,104 @@ test("identifies generated annotations by both author and tag", () => {
     isGeneratedResultAnnotation(annotation("pasiofigure", "Formula 7")),
     true,
   );
+  for (const kind of ["figure", "table", "formula"] as const) {
+    assert.equal(
+      isGeneratedResultAnnotation(annotation("pasiofigure", kind)),
+      true,
+    );
+    assert.equal(
+      isGeneratedResultAnnotation(annotation("Researcher", kind)),
+      false,
+    );
+    assert.equal(getGeneratedAnnotationKind({ tags: [{ name: kind }] }), kind);
+  }
+});
+
+test("selected conversion preserves unselected annotations and skips duplicates for all result types", async () => {
+  const unselected = makeExistingAnnotation(
+    makeCandidate("Figure 9", "Keep", 50),
+  );
+  const personal = makeExistingAnnotation(
+    makeCandidate("Table 9", "Personal", 70),
+  );
+  personal.item.annotationAuthorName = "Researcher";
+  const annotations = [unselected.item, personal.item];
+  const attachment = {
+    getAnnotations: () => annotations,
+  } as unknown as Zotero.Item;
+  const platform = createZoteroFigureGalleryPlatform();
+  const harness = installZoteroHarness();
+  try {
+    for (const [index, kind] of (
+      ["figure", "formula", "table"] as const
+    ).entries()) {
+      const tag = `${kind[0].toUpperCase()}${kind.slice(1)} 1`;
+      const result = {
+        ...makeCandidate(tag, `Selected ${kind}`, index * 10),
+        id: kind,
+        kind,
+        imageFile: `${kind}.png`,
+        pageLabel: "1",
+      };
+      await platform.addAnnotation(attachment, result);
+      assert.equal(harness.created.length, index + 1);
+      assert.deepEqual(harness.created[index].tags, [kind]);
+      annotations.push(makeExistingAnnotation({ ...result, tag: kind }).item);
+      await platform.addAnnotation(attachment, result);
+      assert.equal(harness.created.length, index + 1);
+    }
+    assert.equal(unselected.erased, false);
+    assert.equal(personal.erased, false);
+    assert.ok(harness.created.every(({ erased }) => !erased));
+  } finally {
+    harness.restore();
+  }
+});
+
+test("imports category-tagged image annotations without losing their result kind", () => {
+  for (const tag of ["figure", "table", "formula", "Table 2"]) {
+    const existing = makeExistingAnnotation(makeCandidate(tag, "Caption"));
+    existing.item.isAnnotation = () => true;
+    const result = getImageAnnotationCandidate(existing.item);
+    assert.equal(result?.tag, tag);
+    assert.equal(result?.comment, "Caption");
+  }
+});
+
+test("replacement recognizes category-tagged annotations and numbered legacy annotations as the same result", async () => {
+  const candidate = makeCandidate("Table 2", "Table 2. Caption");
+  const harness = installZoteroHarness();
+  try {
+    for (const tag of ["Table 2", "table"]) {
+      const existing = makeExistingAnnotation({ ...candidate, tag });
+      const result = await reconcileGeneratedAnnotations(
+        makeReader([existing.item]),
+        0,
+        [candidate],
+        "replace-page",
+      );
+      assert.deepEqual(result, { created: 0, removed: 0, skipped: 1 });
+      assert.equal(existing.erased, false);
+    }
+    assert.equal(harness.created.length, 0);
+  } finally {
+    harness.restore();
+  }
+});
+
+test("deleting a numbered local result removes its category-tagged annotation only", async () => {
+  const candidate = makeCandidate("Formula 3", "(3)");
+  const existing = makeExistingAnnotation({ ...candidate, tag: "formula" });
+  const other = makeExistingAnnotation(makeCandidate("formula", "Keep", 50));
+  const attachment = {
+    getAnnotations: () => [existing.item, other.item],
+  } as unknown as Zotero.Item;
+  assert.equal(
+    await removeGeneratedAnnotationForCandidate(attachment, candidate),
+    true,
+  );
+  assert.equal(existing.erased, true);
+  assert.equal(other.erased, false);
 });
 
 test("rejects annotation candidates without a generated result tag", async () => {
@@ -131,7 +233,7 @@ test("updates an existing generated annotation after a manual caption edit", asy
       rects: [candidate.rect],
     }),
     annotationType: "image",
-    getTags: () => [{ tag: candidate.tag }],
+    getTags: () => [{ tag: "figure" }],
     saveTx: async () => {
       saves++;
     },
@@ -163,7 +265,7 @@ test("updates an existing generated annotation after a region correction", async
       rects: [previous.rect],
     }),
     annotationType: "image",
-    getTags: () => [{ tag: previous.tag }],
+    getTags: () => [{ tag: "formula" }],
     saveTx: async () => {
       saves++;
     },
@@ -366,17 +468,19 @@ function installZoteroHarness(
   onSave?: () => void,
   failCreatedSave = false,
 ): {
-  created: Array<{ erased: boolean; item: Zotero.Item }>;
+  created: Array<{ erased: boolean; item: Zotero.Item; tags: string[] }>;
   restore: () => void;
 } {
   const previous = globalThis.Zotero;
-  const created: Array<{ erased: boolean; item: Zotero.Item }> = [];
+  const created: Array<{ erased: boolean; item: Zotero.Item; tags: string[] }> =
+    [];
   let nextKey = 1;
   globalThis.Zotero = {
     Annotations: {
       saveFromJSON: async () => {
         const state = {
           erased: false,
+          tags: [] as string[],
           item: undefined as unknown as Zotero.Item,
         };
         state.item = {
@@ -388,7 +492,9 @@ function installZoteroHarness(
               throw new Error("simulated annotation save failure");
             }
           },
-          setTags: () => undefined,
+          setTags: (tags: string[]) => {
+            state.tags = tags;
+          },
         } as unknown as Zotero.Item;
         created.push(state);
         onSave?.();

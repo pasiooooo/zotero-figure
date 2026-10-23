@@ -1,6 +1,9 @@
 import type { Rect } from "../../domain/layout";
 import { containsResultRegion } from "../../domain/resultRegion";
-import type { FigureGalleryBatchResult } from "../../domain/figureGallery";
+import type {
+  FigureGalleryBatchAction,
+  FigureGalleryBatchResult,
+} from "../../domain/figureGallery";
 import { layoutPinnedCards, type Point } from "../../domain/pinnedFigureCard";
 import {
   countFigureSidebarItems,
@@ -33,6 +36,8 @@ import {
   createFigureSidebarIcon,
   createNativeNoteIcon,
   createPluginIcon,
+  setFigureMenuIcon,
+  type FigureSidebarIconKind,
 } from "./figureSidebarIcons";
 import type { ResultCorrectionPreview } from "./resultRegionEditor";
 import { monitorImageLoad, type ImageLoadMonitor } from "./imageLoadMonitor";
@@ -109,7 +114,7 @@ export interface FigureSidebarPanelOptions {
   onRemove(result: StoredFigureResult): Promise<void>;
   onRunBatch(
     resultIDs: readonly string[],
-    action: "delete" | "export",
+    action: FigureGalleryBatchAction,
   ): Promise<FigureGalleryBatchResult | undefined>;
   onRerecognizeLatex(result: StoredFigureResult): Promise<StoredFigureResult>;
   onResultsDisplayed(results: readonly StoredFigureResult[]): void;
@@ -353,7 +358,9 @@ export class FigureSidebarPanel {
     }
   }
 
-  private async runSelectedBatch(action: "delete" | "export"): Promise<void> {
+  private async runSelectedBatch(
+    action: FigureGalleryBatchAction,
+  ): Promise<void> {
     if (this.batchBusy || !this.selectedResultIDs.size) return;
     const document = this.document;
     if (!document) return;
@@ -402,7 +409,9 @@ export class FigureSidebarPanel {
       this.batchStatus = getString(
         action === "delete"
           ? "gallery-batch-deleted"
-          : "gallery-batch-exported",
+          : action === "annotations"
+            ? "gallery-batch-annotated"
+            : "gallery-batch-exported",
         { args: { count: outcome.completedIDs.length } },
       );
       if (outcome.errors.length)
@@ -2318,101 +2327,178 @@ export class FigureSidebarPanel {
       "menupopup",
     ) as MenuPopup;
     menu.id = `${PANEL_ID}-menu`;
-    if (sourceCard) {
-      this.appendMenuItem(menu, "gallery-export-selected", () =>
-        this.runSelectedBatch("export"),
-      );
-      this.appendMenuItem(menu, "gallery-delete-selected", () =>
-        this.runSelectedBatch("delete"),
-      );
-      this.appendMenuItem(menu, "gallery-select-all", () =>
-        this.selectAllResults(),
-      );
-      this.appendMenuItem(menu, "gallery-clear-selection", () => {
-        this.selectedResultIDs.clear();
-        this.selectionAnchorID = undefined;
-        this.updateSelection();
-      });
-      if (this.selectedResultIDs.size > 1)
-        this.appendMenuItem(menu, "sidebar-pin-image", () =>
-          this.pinSelectedCards(result, sourceCard),
-        );
-      menu.append(
-        this.options.ownerWindow.document.createXULElement("menuseparator"),
+    if (!sourceCard || this.selectedResultIDs.size === 1) {
+      this.appendMenuItem(
+        menu,
+        "sidebar-go-to-page",
+        () => this.options.onGoToPage(result),
+        "search",
       );
     }
-    if (!sourceCard || this.selectedResultIDs.size === 1) {
-      this.appendMenuItem(menu, "sidebar-copy-image", () =>
-        this.options.onCopyImage(result),
-      );
-      if (result.kind === "formula") {
-        this.appendMenuItem(menu, "sidebar-copy-latex", () =>
-          this.copyFormulaLatex(anchor, result),
-        );
-        if (result.latex) {
-          this.appendMenuItem(menu, "sidebar-rerecognize-latex", () =>
-            this.rerecognizeFormulaLatex(anchor, result),
-          );
-          this.appendMenuItem(menu, "sidebar-edit-latex", () =>
-            this.openLatexEditor(result),
-          );
-        }
-      }
-      this.appendMenuItem(menu, "sidebar-save-image", () =>
-        this.options.onSaveImage(result),
-      );
-      if (sourceCard) {
-        this.appendMenuItem(menu, "sidebar-pin-image", () => {
+    if (sourceCard) {
+      this.appendMenuItem(
+        menu,
+        "sidebar-pin-image",
+        () => {
           return this.pinSelectedCards(result, sourceCard);
-        });
-      }
-      this.appendMenuItem(menu, "sidebar-go-to-page", () =>
-        this.options.onGoToPage(result),
+        },
+        "pin",
       );
-      this.appendMenuItem(menu, "sidebar-edit-comment", () =>
-        this.openCommentEditor(result),
+    }
+    menu.append(
+      this.options.ownerWindow.document.createXULElement("menuseparator"),
+    );
+
+    if (!sourceCard || this.selectedResultIDs.size === 1) {
+      this.appendMenuItem(
+        menu,
+        "sidebar-copy-image",
+        () => this.options.onCopyImage(result),
+        "copy",
       );
-      this.appendMenuItem(menu, "sidebar-correct-region", () =>
-        this.openRegionEditor(result),
+      if (result.kind === "formula")
+        this.appendMenuItem(
+          menu,
+          "sidebar-copy-latex",
+          () => this.copyFormulaLatex(anchor, result),
+          "formula",
+        );
+      this.appendMenuItem(
+        menu,
+        "sidebar-save-image",
+        () => this.options.onSaveImage(result),
+        "export",
+      );
+    } else {
+      this.appendMenuItem(
+        menu,
+        "gallery-export-selected",
+        () => this.runSelectedBatch("export"),
+        "export",
+      );
+    }
+    if (sourceCard)
+      this.appendMenuItem(
+        menu,
+        "gallery-annotate-selected",
+        () => this.runSelectedBatch("annotations"),
+        "annotation",
+      );
+    if (!sourceCard || this.selectedResultIDs.size === 1)
+      this.appendMenuItem(
+        menu,
+        "sidebar-add-to-note",
+        () => this.addResultToNote(result),
+        "note",
+      );
+    menu.append(
+      this.options.ownerWindow.document.createXULElement("menuseparator"),
+    );
+
+    if (!sourceCard || this.selectedResultIDs.size === 1) {
+      const editMenu = this.appendSubmenu(menu, "result-menu-edit", "edit");
+      this.appendMenuItem(
+        editMenu,
+        "sidebar-edit-comment",
+        () => this.openCommentEditor(result),
+        "edit",
+      );
+      this.appendMenuItem(
+        editMenu,
+        "sidebar-correct-region",
+        () => this.openRegionEditor(result),
+        "region",
       );
       if (!this.options.isAnalyzing()) {
-        this.appendMenuItem(menu, "sidebar-correct-caption", () => {
-          this.closeMenu();
-          this.options.ownerWindow.setTimeout(() => {
-            if (!this.disposed) this.options.onCorrectCaption(result);
-          }, 0);
-        });
-        this.appendMenuItem(menu, "sidebar-recognize-region", () =>
-          this.options.onRecognizeRegion(result),
+        this.appendMenuItem(
+          editMenu,
+          "sidebar-correct-caption",
+          () => {
+            this.closeMenu();
+            this.options.ownerWindow.setTimeout(() => {
+              if (!this.disposed) this.options.onCorrectCaption(result);
+            }, 0);
+          },
+          "annotation",
+        );
+        this.appendMenuItem(
+          editMenu,
+          "sidebar-recognize-region",
+          () => this.options.onRecognizeRegion(result),
+          "refresh",
         );
       }
-      menu.append(
-        this.options.ownerWindow.document.createXULElement("menuseparator"),
-      );
-      this.appendMenuItem(menu, "sidebar-add-to-note", () =>
-        this.addResultToNote(result),
-      );
-      if (!sourceCard)
-        this.appendMenuItem(menu, "sidebar-remove", () =>
-          this.options.onRemove(result),
+      if (result.kind === "formula" && result.latex) {
+        editMenu.append(
+          this.options.ownerWindow.document.createXULElement("menuseparator"),
         );
+        this.appendMenuItem(
+          editMenu,
+          "sidebar-rerecognize-latex",
+          () => this.rerecognizeFormulaLatex(anchor, result),
+          "refresh",
+        );
+        this.appendMenuItem(
+          editMenu,
+          "sidebar-edit-latex",
+          () => this.openLatexEditor(result),
+          "formula",
+        );
+      }
     }
+    if (sourceCard) {
+      const selectionMenu = this.appendSubmenu(
+        menu,
+        "result-menu-selection",
+        "select",
+      );
+      this.appendMenuItem(
+        selectionMenu,
+        "gallery-select-all",
+        () => this.selectAllResults(),
+        "select",
+      );
+      this.appendMenuItem(
+        selectionMenu,
+        "gallery-clear-selection",
+        () => {
+          this.selectedResultIDs.clear();
+          this.selectionAnchorID = undefined;
+          this.updateSelection();
+        },
+        "clear",
+      );
+    }
+    menu.append(
+      this.options.ownerWindow.document.createXULElement("menuseparator"),
+    );
+    if (sourceCard)
+      this.appendMenuItem(
+        menu,
+        "gallery-delete-selected",
+        () => this.runSelectedBatch("delete"),
+        "trash",
+      );
+    else
+      this.appendMenuItem(
+        menu,
+        "sidebar-remove",
+        () => this.options.onRemove(result),
+        "trash",
+      );
     const container =
       (this.options.reader as PdfReader & { _popupset?: Element })._popupset ??
       this.options.ownerWindow.document.documentElement;
     container.append(menu);
     this.menu = menu;
     this.menuAnchor = anchor;
-    menu.addEventListener(
-      "popuphidden",
-      () => {
-        menu.remove();
-        if (this.menu !== menu) return;
-        this.menu = undefined;
-        this.menuAnchor = undefined;
-      },
-      { once: true },
-    );
+    menu.addEventListener("popuphidden", (event) => {
+      if (event.target !== menu) return;
+      menu.remove();
+      if (this.menu !== menu) return;
+      this.menu = undefined;
+      this.menuAnchor = undefined;
+    });
     if (event) {
       const { screenX, screenY } = event;
       // Match the native Reader menu: open after the right-button event finishes.
@@ -2761,15 +2847,32 @@ export class FigureSidebarPanel {
     menu: MenuPopup,
     key: string,
     command: () => void | Promise<void>,
+    icon: FigureSidebarIconKind,
   ): void {
     const item = this.options.ownerWindow.document.createXULElement("menuitem");
     item.setAttribute("label", getString(key));
+    setFigureMenuIcon(item, icon);
     item.addEventListener("command", () => {
       void Promise.resolve(command()).catch((error) =>
         Zotero.logError(toError(error)),
       );
     });
     menu.append(item);
+  }
+
+  private appendSubmenu(
+    parent: MenuPopup,
+    key: string,
+    icon: FigureSidebarIconKind,
+  ): MenuPopup {
+    const document = this.options.ownerWindow.document;
+    const item = document.createXULElement("menu");
+    item.setAttribute("label", getString(key));
+    setFigureMenuIcon(item, icon);
+    const popup = document.createXULElement("menupopup") as MenuPopup;
+    item.append(popup);
+    parent.append(item);
+    return popup;
   }
 
   private async goToPage(result: StoredFigureResult): Promise<void> {

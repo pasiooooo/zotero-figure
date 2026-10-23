@@ -7,16 +7,58 @@ export type FigureSidebarIconKind =
   | "all"
   | "annotation"
   | "check"
+  | "clear"
+  | "copy"
+  | "edit"
   | "expand"
+  | "export"
   | "folder"
+  | "group"
   | "languages"
   | "loading"
   | "menu"
+  | "note"
   | "pin"
   | "refresh"
   | "region"
   | "search"
+  | "select"
   | "trash";
+
+const menuIconURLs = new Map<FigureSidebarIconKind, string>();
+
+export function setFigureMenuIcon(
+  item: Element,
+  kind: FigureSidebarIconKind,
+): void {
+  let image = menuIconURLs.get(kind);
+  if (!image) {
+    const parts = getFigureSidebarIconParts(kind)
+      .map(([tag, attributes]) => {
+        const values = Object.entries(attributes)
+          .map(
+            ([key, value]) =>
+              `${key}="${value.replaceAll("currentColor", "context-fill")}"`,
+          )
+          .join(" ");
+        return `<${tag} ${values}/>`;
+      })
+      .join("");
+    const viewBox = kind === "annotation" ? "0 0 16 16" : "0 0 24 24";
+    image = `data:image/svg+xml,${encodeURIComponent(
+      `<svg xmlns="${SVG_NAMESPACE}" viewBox="${viewBox}" width="16" height="16" fill="none" stroke="context-fill" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${parts}</svg>`,
+    )}`;
+    menuIconURLs.set(kind, image);
+  }
+  item.classList.add(
+    item.localName === "menu" ? "menu-iconic" : "menuitem-iconic",
+  );
+  item.setAttribute("image", image);
+  item.setAttribute(
+    "style",
+    "-moz-context-properties: fill; fill: currentColor;",
+  );
+}
 
 export function createFigureSidebarIcon(
   document: Document,
@@ -78,6 +120,32 @@ export function getFigureSidebarIconParts(
   kind: FigureSidebarIconKind,
 ): Array<[string, Record<string, string>]> {
   switch (kind) {
+    case "copy":
+      return [
+        ["rect", { x: "8", y: "8", width: "13", height: "13", rx: "2" }],
+        [
+          "path",
+          { d: "M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" },
+        ],
+      ];
+    case "edit":
+      return [["path", { d: "m16 3 5 5L9 20l-6 1 1-6L16 3ZM13 6l5 5" }]];
+    case "export":
+      return [["path", { d: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" }]];
+    case "select":
+      return [
+        ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }],
+        ["path", { d: "m7 12 3 3 7-7" }],
+      ];
+    case "clear":
+      return [["path", { d: "M5 5l14 14M19 5 5 19" }]];
+    case "group":
+      return [
+        ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }],
+        ["path", { d: "M3 9h18M9 9v12" }],
+      ];
+    case "note":
+      return [["path", { d: "M14 21H4V3h16v12l-6 6Zm0 0v-6h6M8 7h8M8 11h5" }]];
     case "all":
       return [["path", { d: "M12 4v16M5 8l14 8M5 16l14-8" }]];
     case "folder":

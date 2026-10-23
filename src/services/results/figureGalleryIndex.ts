@@ -1,5 +1,6 @@
 import {
   extractFigureGalleryYear,
+  type FigureGalleryBatchAction,
   type FigureGalleryBootstrap,
   type FigureGalleryBatchResult,
   type FigureGalleryEntry,
@@ -160,7 +161,7 @@ export class FigureGalleryIndex {
 
   public async runBatch(
     entryIDs: readonly string[],
-    action: "delete" | "export",
+    action: FigureGalleryBatchAction,
   ): Promise<FigureGalleryBatchResult | undefined> {
     if (!entryIDs.length) return { completedIDs: [], errors: [] };
     const directory =
@@ -169,6 +170,10 @@ export class FigureGalleryIndex {
         : undefined;
     if (directory === false) return undefined;
     const outcome: FigureGalleryBatchResult = { completedIDs: [], errors: [] };
+    const annotationResults = new Map<
+      number,
+      Map<string, StoredFigureResult>
+    >();
     for (const entryID of new Set(entryIDs)) {
       try {
         const source = this.getSource(entryID);
@@ -189,6 +194,23 @@ export class FigureGalleryIndex {
           throw new Error("PDF attachment is unavailable");
         if (!attachment.isEditable())
           throw new Error("PDF attachment is read-only");
+        if (action === "annotations") {
+          let results = annotationResults.get(attachment.id);
+          if (!results) {
+            results = new Map(
+              (await this.resultStore.list(attachment)).map((result) => [
+                result.id,
+                result,
+              ]),
+            );
+            annotationResults.set(attachment.id, results);
+          }
+          const result = results.get(source.resultID);
+          if (!result) throw new Error("Figure result is no longer available");
+          await this.platform.addAnnotation(attachment, result);
+          outcome.completedIDs.push(entryID);
+          continue;
+        }
         const removed = await this.resultStore.remove(
           attachment,
           source.resultID,
@@ -213,7 +235,7 @@ export class FigureGalleryIndex {
   public async runAttachmentBatch(
     attachment: Zotero.Item,
     resultIDs: readonly string[],
-    action: "delete" | "export",
+    action: FigureGalleryBatchAction,
   ): Promise<FigureGalleryBatchResult | undefined> {
     const indexed = await this.loadAttachment(
       attachment.libraryID,

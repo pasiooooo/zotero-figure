@@ -5,9 +5,13 @@ import type {
 import type { Rect } from "../../domain/layout";
 import type { FigureResultRecord } from "../../domain/figureResults";
 import { getString } from "../../utils/locale";
-import { removeGeneratedAnnotationForCandidate } from "./annotations";
+import {
+  reconcileGeneratedAnnotations,
+  removeGeneratedAnnotationForCandidate,
+} from "./annotations";
 
 export interface FigureGalleryPlatform {
+  addAnnotation(item: Zotero.Item, result: FigureResultRecord): Promise<void>;
   chooseExportDirectory(): Promise<string | false>;
   exportImage(path: string, directory: string, filename: string): Promise<void>;
   getAttachment(libraryID: number, key: string): Promise<Zotero.Item | false>;
@@ -42,6 +46,15 @@ function getSelectedLibraryID(): number | undefined {
 
 export function createZoteroFigureGalleryPlatform(): FigureGalleryPlatform {
   return {
+    addAnnotation: async (item, result) => {
+      // Partial conversion must preserve other annotations on the same page.
+      await reconcileGeneratedAnnotations(
+        item,
+        result.pageIndex,
+        [result],
+        "skip-existing",
+      );
+    },
     chooseExportDirectory: () =>
       new ztoolkit.FilePicker(
         getString("gallery-export-selected"),

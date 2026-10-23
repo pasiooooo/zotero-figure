@@ -541,7 +541,7 @@ interface SelectionInternals {
     modifiers: Pick<MouseEvent, "ctrlKey" | "metaKey" | "shiftKey">,
   ): void;
   handleSelectionKeyDown(event: KeyboardEvent): void;
-  runSelectedBatch(action: "delete" | "export"): Promise<void>;
+  runSelectedBatch(action: "delete" | "export" | "annotations"): Promise<void>;
   render(): void;
   renderContent(): void;
   loadingResults: boolean;
@@ -690,6 +690,36 @@ test("sidebar deletion confirms kind counts, handles cancellation and retains fa
     assert.equal(state.panelContent!.inert, false);
     assert.equal(state.batchBusy, false);
     assert.equal(focusRestored, 1);
+  } finally {
+    testGlobals.addon = previousAddon;
+  }
+});
+
+test("sidebar annotation conversion preserves results and selection without a deletion prompt", async () => {
+  const previousAddon = testGlobals.addon;
+  testGlobals.addon = { data: {} } as typeof addon;
+  try {
+    const state = selectionPanel({
+      ownerWindow: {
+        confirm: () => assert.fail("conversion must not ask to delete"),
+      } as unknown as Window,
+      onRunBatch: async (ids, action) => {
+        assert.equal(action, "annotations");
+        assert.deepEqual(ids, ["figure", "formula"]);
+        assert.equal(state.panelContent!.inert, true);
+        return { completedIDs: [...ids], errors: [] };
+      },
+    });
+    state.selectedResultIDs = new Set(["figure", "formula"]);
+    await state.runSelectedBatch("annotations");
+    assert.deepEqual(
+      state.results.map(({ id }) => id),
+      ["figure", "formula", "table"],
+    );
+    assert.deepEqual([...state.selectedResultIDs], ["figure", "formula"]);
+    assert.match(state.batchStatus!, /gallery-batch-annotated/);
+    assert.equal(state.panelContent!.inert, false);
+    assert.equal(state.batchBusy, false);
   } finally {
     testGlobals.addon = previousAddon;
   }
@@ -1003,6 +1033,7 @@ test("native sidebar batch menu opens after the context event and cancels stale 
         createXULElement: () => ({
           append() {},
           remove() {},
+          classList: { add() {} },
           setAttribute() {},
           addEventListener() {},
           openPopupAtScreen: (x: number, y: number) => opened.push([x, y]),
@@ -1046,18 +1077,117 @@ test("native sidebar batch menu opens after the context event and cancels stale 
     assert.equal(mounted.length, 1);
     assert.equal(opened.length, 0);
     assert.ok(labels.includes("gallery-export-selected"));
+    assert.ok(labels.includes("gallery-annotate-selected"));
     assert.ok(labels.includes("gallery-delete-selected"));
     assert.ok(labels.includes("sidebar-pin-image"));
     scheduled.shift()!();
     assert.deepEqual(opened, [[800, 400]]);
     commands.get("gallery-export-selected")!();
+    commands.get("gallery-annotate-selected")!();
     commands.get("gallery-delete-selected")!();
     commands.get("sidebar-pin-image")!();
-    assert.deepEqual(actions, ["export", "delete", "float"]);
+    assert.deepEqual(actions, ["export", "annotations", "delete", "float"]);
     state.openMenu(anchor, state.results[0], event);
     state.closeMenu();
     scheduled.shift()!();
     assert.equal(opened.length, 1);
+  } finally {
+    testGlobals.addon = previousAddon;
+  }
+});
+
+test("sidebar menus group editing and selection, keep deletion last, and ignore nested popup closure", () => {
+  const previousAddon = testGlobals.addon;
+  testGlobals.addon = { data: {} } as typeof addon;
+  class MenuNode {
+    constructor(readonly localName: string) {}
+    attributes = new Map<string, string>();
+    children: MenuNode[] = [];
+    events = new Map<string, (event: { target: MenuNode }) => void>();
+    classList = { add() {} };
+    removed = false;
+    append(...nodes: MenuNode[]) {
+      this.children.push(...nodes);
+    }
+    setAttribute(key: string, value: string) {
+      this.attributes.set(key, value);
+    }
+    addEventListener(
+      name: string,
+      handler: (event: { target: MenuNode }) => void,
+    ) {
+      this.events.set(name, handler);
+    }
+    remove() {
+      this.removed = true;
+    }
+    openPopup() {}
+  }
+  const mounted: MenuNode[] = [];
+  try {
+    const state = selectionPanel({
+      ownerWindow: {
+        document: { createXULElement: (name: string) => new MenuNode(name) },
+      } as unknown as Window,
+      reader: {
+        _popupset: { append: (menu: MenuNode) => mounted.push(menu) },
+      } as unknown as PdfReader,
+    }) as SelectionInternals & {
+      openMenu(anchor: HTMLButtonElement, result: StoredFigureResult): void;
+      menu?: MenuNode;
+    };
+    const anchor = {
+      closest: () => state.resultCards.get("formula"),
+    } as unknown as HTMLButtonElement;
+    state.selectedResultIDs = new Set(["formula"]);
+    const result = { ...state.results[1], latex: "x=1" };
+    state.openMenu(anchor, result);
+    const menu = mounted[0];
+    const label = (node: MenuNode) =>
+      node.attributes.get("label")?.replace("pasiofigure-", "");
+    const top = menu.children.map(label).filter(Boolean);
+    assert.deepEqual(top, [
+      "sidebar-go-to-page",
+      "sidebar-pin-image",
+      "sidebar-copy-image",
+      "sidebar-copy-latex",
+      "sidebar-save-image",
+      "gallery-annotate-selected",
+      "sidebar-add-to-note",
+      "result-menu-edit",
+      "result-menu-selection",
+      "gallery-delete-selected",
+    ]);
+    const edit = menu.children.find(
+      (node) => label(node) === "result-menu-edit",
+    )!.children[0];
+    assert.ok(
+      edit.children.some((node) => label(node) === "sidebar-correct-caption"),
+    );
+    assert.ok(
+      edit.children.some((node) => label(node) === "sidebar-edit-latex"),
+    );
+    const checkIcons = (node: MenuNode) => {
+      if (node.localName === "menuitem" || node.localName === "menu")
+        assert.ok(
+          node.attributes.get("image")?.startsWith("data:image/svg+xml,"),
+        );
+      node.children.forEach(checkIcons);
+    };
+    checkIcons(menu);
+    menu.events.get("popuphidden")!({ target: edit });
+    assert.equal(menu.removed, false);
+    assert.equal(state.menu, menu);
+    menu.events.get("popuphidden")!({ target: menu });
+    assert.equal(menu.removed, true);
+    assert.equal(state.menu, undefined);
+    state.selectedResultIDs = new Set(["figure", "formula"]);
+    state.openMenu(anchor, result);
+    const multiLabels = mounted[1].children.map(label);
+    assert.ok(multiLabels.includes("gallery-export-selected"));
+    assert.ok(!multiLabels.includes("sidebar-save-image"));
+    assert.ok(!multiLabels.includes("result-menu-edit"));
+    assert.equal(multiLabels.at(-1), "gallery-delete-selected");
   } finally {
     testGlobals.addon = previousAddon;
   }

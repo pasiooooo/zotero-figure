@@ -1,4 +1,5 @@
 import { config } from "../package.json";
+import type { FigureGalleryBatchAction } from "./domain/figureGallery";
 import {
   registerPrefs,
   registerPrefsScripts,
@@ -56,7 +57,7 @@ async function onStartup(): Promise<void> {
     loadLibrary: (libraryID: number) => galleryIndex.loadLibrary(libraryID),
     openSource: (entryID: string) => galleryIndex.openSource(entryID),
     readImage: (entryID: string) => galleryIndex.readImage(entryID),
-    runBatch: async (entryIDs: string[], action: "delete" | "export") => {
+    runBatch: async (entryIDs: string[], action: FigureGalleryBatchAction) => {
       const outcome = await galleryIndex.runBatch(entryIDs, action);
       if (action === "delete" && outcome?.completedIDs.length) {
         for (const controller of controllers.values())

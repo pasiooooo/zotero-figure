@@ -144,7 +144,7 @@ export async function saveGeneratedAnnotation(
     annotation as unknown as _ZoteroTypes.Annotations.AnnotationJson,
   );
   try {
-    saved.setTags([candidate.tag]);
+    saved.setTags([getFigureResultKind(candidate.tag)]);
     await saved.saveTx();
     return saved;
   } catch (error) {
@@ -408,9 +408,12 @@ function buildFingerprint(
   comment?: string,
 ): string {
   const normalizedRect = rect.map((value) => value.toFixed(1)).join(",");
-  return [pageIndex, normalizedRect, tag.trim(), comment?.trim() ?? ""].join(
-    "|",
-  );
+  return [
+    pageIndex,
+    normalizedRect,
+    isFigureResultTag(tag) ? getFigureResultKind(tag) : tag.trim(),
+    comment?.trim() ?? "",
+  ].join("|");
 }
 
 function getAnnotationPageIndex(annotation: Zotero.Item): number | undefined {

@@ -1,6 +1,11 @@
 import { config } from "../../../package.json";
 import { getGalleryInitialFilter } from "./galleryInitialFilter";
+import {
+  setFigureMenuIcon,
+  type FigureSidebarIconKind,
+} from "../reader/figureSidebarIcons";
 import type {
+  FigureGalleryBatchAction,
   FigureGalleryBootstrap,
   FigureGalleryCollection,
   FigureGalleryBatchResult,
@@ -69,7 +74,7 @@ interface FigureGalleryApi {
   readImage(entryID: string): Promise<FigureGalleryImage>;
   runBatch(
     entryIDs: string[],
-    action: "delete" | "export",
+    action: FigureGalleryBatchAction,
   ): Promise<FigureGalleryBatchResult | undefined>;
   setComparisonLayout(
     libraryID: number,
@@ -529,7 +534,9 @@ function updateSelectionControls(): void {
     });
 }
 
-async function runSelectedBatch(action: "delete" | "export"): Promise<void> {
+async function runSelectedBatch(
+  action: FigureGalleryBatchAction,
+): Promise<void> {
   if (!galleryApi || controlsDisabled || batchBusy || !selectedEntryIDs.size)
     return;
   const entryIDs = [...selectedEntryIDs];
@@ -581,7 +588,11 @@ async function runSelectedBatch(action: "delete" | "export"): Promise<void> {
     }
     setLocalizedText(
       elements.batchStatus,
-      action === "delete" ? "gallery-batch-deleted" : "gallery-batch-exported",
+      action === "delete"
+        ? "gallery-batch-deleted"
+        : action === "annotations"
+          ? "gallery-batch-annotated"
+          : "gallery-batch-exported",
       { count: outcome.completedIDs.length },
     );
     if (outcome.errors.length) showError(outcome.errors.join("\n"));
@@ -928,6 +939,7 @@ async function openGalleryContextMenu(
     noOtherGroupsLabel,
     dissolveGroupLabel,
     exportLabel,
+    annotationsLabel,
     deleteLabel,
     selectAllLabel,
     clearSelectionLabel,
@@ -937,6 +949,7 @@ async function openGalleryContextMenu(
     localize("gallery-comparison-no-other-groups"),
     localize("gallery-comparison-dissolve-group"),
     localize("gallery-export-selected"),
+    localize("gallery-annotate-selected"),
     localize("gallery-delete-selected"),
     localize("gallery-select-all"),
     localize("gallery-clear-selection"),
@@ -963,17 +976,20 @@ async function openGalleryContextMenu(
 
   popup.append(
     createGalleryMenuItem(ownerDocument, selectedLabel, undefined, true),
+    ownerDocument.createXULElement("menuseparator"),
+    createGalleryMenuItem(
+      ownerDocument,
+      annotationsLabel,
+      () => void runSelectedBatch("annotations"),
+      !selectedEntryIDs.size,
+      "annotation",
+    ),
     createGalleryMenuItem(
       ownerDocument,
       exportLabel,
       () => void runSelectedBatch("export"),
       !selectedEntryIDs.size,
-    ),
-    createGalleryMenuItem(
-      ownerDocument,
-      deleteLabel,
-      () => void runSelectedBatch("delete"),
-      !selectedEntryIDs.size,
+      "export",
     ),
     ownerDocument.createXULElement("menuseparator"),
     createGalleryMenuItem(
@@ -981,12 +997,14 @@ async function openGalleryContextMenu(
       selectAllLabel,
       selectAllGalleryEntries,
       !filteredEntries.length,
+      "select",
     ),
     createGalleryMenuItem(
       ownerDocument,
       clearSelectionLabel,
       clearGallerySelection,
       !selectedEntryIDs.size,
+      "clear",
     ),
   );
 
@@ -999,6 +1017,7 @@ async function openGalleryContextMenu(
     popup.append(ownerDocument.createXULElement("menuseparator"));
     const groupMenu = ownerDocument.createXULElement("menu");
     groupMenu.setAttribute("label", addToGroupLabel);
+    setFigureMenuIcon(groupMenu, "group");
     const groupPopup = ownerDocument.createXULElement("menupopup");
     const targetRows = groupRows.filter(({ id }) => id !== target.rowID);
     if (!targetRows.length) {
@@ -1023,6 +1042,8 @@ async function openGalleryContextMenu(
                 row.id,
               );
             },
+            false,
+            "group",
           ),
         );
       }
@@ -1034,23 +1055,36 @@ async function openGalleryContextMenu(
   if (sourceRow?.isGroup) {
     popup.append(ownerDocument.createXULElement("menuseparator"));
     popup.append(
-      createGalleryMenuItem(ownerDocument, dissolveGroupLabel, () => {
-        dissolveComparisonRow(sourceRow.id);
-      }),
+      createGalleryMenuItem(
+        ownerDocument,
+        dissolveGroupLabel,
+        () => {
+          dissolveComparisonRow(sourceRow.id);
+        },
+        false,
+        "clear",
+      ),
     );
   }
+  popup.append(
+    ownerDocument.createXULElement("menuseparator"),
+    createGalleryMenuItem(
+      ownerDocument,
+      deleteLabel,
+      () => void runSelectedBatch("delete"),
+      !selectedEntryIDs.size,
+      "trash",
+    ),
+  );
   const container =
     ownerDocument.querySelector("#browser") ?? ownerDocument.documentElement;
   container.append(popup);
   galleryContextMenu = popup;
-  popup.addEventListener(
-    "popuphidden",
-    () => {
-      popup.remove();
-      if (galleryContextMenu === popup) galleryContextMenu = undefined;
-    },
-    { once: true },
-  );
+  popup.addEventListener("popuphidden", (event) => {
+    if (event.target !== popup) return;
+    popup.remove();
+    if (galleryContextMenu === popup) galleryContextMenu = undefined;
+  });
   popup.openPopupAtScreen(screenX, screenY, true);
 }
 
@@ -1059,9 +1093,11 @@ function createGalleryMenuItem(
   label: string,
   command?: () => void,
   disabled = false,
+  icon?: FigureSidebarIconKind,
 ): XULElement {
   const item = ownerDocument.createXULElement("menuitem") as XULElement;
   item.setAttribute("label", label);
+  if (icon) setFigureMenuIcon(item, icon);
   if (disabled) item.setAttribute("disabled", "true");
   if (command) {
     item.addEventListener("command", () => {

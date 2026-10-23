@@ -28,15 +28,18 @@ export interface FigureResultCandidate extends AnnotationCandidate {
   image: ArrayBuffer;
 }
 
-const FIGURE_RESULT_TAG_PATTERN = /^(Figure|Formula|Table)(?:\s|$)/;
+const FIGURE_RESULT_TAG_PATTERN =
+  /^(?:(?:Figure|Formula|Table)(?:\s|$)|(?:figure|formula|table)$)/;
 
 export function isFigureResultTag(tag: string): boolean {
   return FIGURE_RESULT_TAG_PATTERN.test(tag);
 }
 
 export function getFigureResultKind(tag: string): FigureResultKind {
-  if (/^Table(?:\s|$)/.test(tag)) return "table";
-  return /^Formula(?:\s|$)/.test(tag) ? "formula" : "figure";
+  if (tag === "table" || /^Table(?:\s|$)/.test(tag)) return "table";
+  return tag === "formula" || /^Formula(?:\s|$)/.test(tag)
+    ? "formula"
+    : "figure";
 }
 
 export function getFigureResultFingerprint(
