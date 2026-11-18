@@ -15,6 +15,10 @@ import {
   throwIfAborted,
 } from "../../utils/cancellation";
 import { getString } from "../../utils/locale";
+import {
+  registerContextMenu,
+  type ContextMenuHandle,
+} from "../../platform/zotero/contextMenu";
 
 type BatchAction = "analyze" | "annotations" | "note" | "import-annotations";
 
@@ -37,6 +41,7 @@ export class FigureBatchController {
   private running = false;
   private runController?: AbortController;
   private started = false;
+  private menus: ContextMenuHandle[] = [];
 
   constructor(
     private readonly layoutAnalyzer: LayoutAnalyzer,
@@ -49,7 +54,9 @@ export class FigureBatchController {
   public start(): void {
     if (this.started) return;
     this.started = true;
-    ztoolkit.Menu.register("item", {
+    // Zotero 11+ registers via Zotero.MenuManager (with the macOS icon
+    // restore); Zotero 9/10 use plugin-owned XUL menus.
+    const itemMenu = registerContextMenu("item", {
       children: [
         this.createMenuItem("batch-menu-analyze", "analyze"),
         this.createMenuItem("batch-menu-analyze-note", "note"),
@@ -61,21 +68,22 @@ export class FigureBatchController {
       label: config.addonName,
       tag: "menu",
     });
-    ztoolkit.Menu.register("item", {
+    this.menus.push(itemMenu);
+    const annotationMenu = registerContextMenu("item", {
       ...this.createMenuItem("reader-menu-add-to-figure", "import-annotations"),
       icon: MENU_ICON,
       id: ANNOTATION_MENU_ID,
       isHidden: () => !hasImageAnnotationSelection(),
       tag: "menuitem",
     });
+    this.menus.push(annotationMenu);
   }
 
   public dispose(): void {
     this.runController?.abort();
     if (!this.started) return;
     this.started = false;
-    ztoolkit.Menu.unregister(MENU_ID);
-    ztoolkit.Menu.unregister(ANNOTATION_MENU_ID);
+    for (const menu of this.menus.splice(0)) menu.dispose();
   }
 
   private createMenuItem(labelKey: string, action: BatchAction) {

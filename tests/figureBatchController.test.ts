@@ -103,11 +103,15 @@ test("dispose aborts the active attachment analysis", async () => {
     },
   };
   (globalThis as any).ztoolkit = {
-    Menu: { register: () => undefined, unregister: () => undefined },
     ProgressWindow,
   };
   globalThis.Zotero = {
     getActiveZoteroPane: () => ({ getSelectedItems: () => [pdf] }),
+    version: "11.0.0",
+    MenuManager: {
+      registerMenu: ({ menuID }: { menuID: string }) => menuID,
+      unregisterMenu: () => true,
+    },
     getMainWindow: () => ({}),
     logError: (error: Error) => assert.fail(error.message),
   } as unknown as typeof Zotero;
@@ -219,7 +223,6 @@ for (const action of ["analyze", "annotations", "note"] as const) {
         },
       };
       (globalThis as any).ztoolkit = {
-        Menu: { register() {}, unregister() {} },
         ProgressWindow,
         getGlobal: () => ({
           prompt: {
@@ -241,6 +244,11 @@ for (const action of ["analyze", "annotations", "note"] as const) {
         topLevelItem: { getDisplayTitle: () => "Paper A" },
       });
       globalThis.Zotero = {
+        version: "11.0",
+        MenuManager: {
+          registerMenu: ({ menuID }: { menuID: string }) => menuID,
+          unregisterMenu: () => true,
+        },
         getActiveZoteroPane: () => ({
           getSelectedItems: () => [firstPdf, makePdf(202)],
         }),

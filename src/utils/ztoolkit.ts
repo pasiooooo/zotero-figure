@@ -1,15 +1,30 @@
-import { ZoteroToolkit } from "zotero-plugin-toolkit";
+import {
+  BasicTool,
+  DialogHelper,
+  FilePickerHelper,
+  makeHelperTool,
+  ProgressWindowHelper,
+  UITool,
+  unregister,
+} from "zotero-plugin-toolkit";
 import { config } from "../../package.json";
 
 export { createZToolkit };
 
+// Keep only the toolkit 6 modules used by the plugin.
+class FigureToolkit extends BasicTool {
+  UI = new UITool(this);
+  ProgressWindow = makeHelperTool(ProgressWindowHelper, this);
+  Dialog = makeHelperTool(DialogHelper, this);
+  FilePicker = makeHelperTool(FilePickerHelper, this);
+
+  unregisterAll(): void {
+    unregister(this);
+  }
+}
+
 function createZToolkit() {
-  const _ztoolkit = new ZoteroToolkit();
-  /**
-   * Alternatively, import toolkit modules you use to minify the plugin size.
-   * You can add the modules under the `MyToolkit` class below and uncomment the following line.
-   */
-  // const _ztoolkit = new MyToolkit();
+  const _ztoolkit = new FigureToolkit();
   initZToolkit(_ztoolkit);
   return _ztoolkit;
 }
@@ -21,8 +36,6 @@ function initZToolkit(_ztoolkit: ReturnType<typeof createZToolkit>) {
   _ztoolkit.basicOptions.log.disableConsole = env === "production";
   _ztoolkit.UI.basicOptions.ui.enableElementJSONLog = false;
   _ztoolkit.UI.basicOptions.ui.enableElementDOMLog = false;
-  _ztoolkit.basicOptions.debug.disableDebugBridgePassword =
-    __env__ === "development";
   _ztoolkit.ProgressWindow.setIconURI(
     "default",
     `chrome://${config.addonRef}/content/icons/favicon.png`,

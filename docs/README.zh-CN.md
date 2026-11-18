@@ -20,7 +20,7 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 - 对比布局保存在 Zotero 数据目录内的 `zotero-figure-pasiooooo/comparison-layouts.json`，支持大型对比表。旧布局会自动迁移；备份时请包含此文件。布局不通过 Zotero Sync 同步。
 - 批量分析选中的文献条目或 PDF 附件，并可将结果写入笔记或 Zotero 标注。
 - 安装 Zotero PDF Translate 后翻译结果说明。
-- 可选通过 SiliconFlow `Qwen/Qwen3.6-35B-A3B` 识别公式 LaTeX，在本机使用 KaTeX 渲染，并可复制、重新识别，或通过 CodeMirror 源码编辑器和 KaTeX 实时预览修改源码。
+- 可选通过 SiliconFlow `Qwen/Qwen3.6-35B-A3B` 或自定义兼容 OpenAI 服务识别公式 LaTeX，在本机使用 KaTeX 渲染，并可复制、重新识别，或通过 CodeMirror 源码编辑器和 KaTeX 实时预览修改源码。
 - 创建带嵌入式 PNG 的 Zotero 笔记，点击图片可返回源 PDF。
 - 可选将本地结果镜像为 Zotero 图片标注，以便同步和兼容其他插件。
 - 界面支持英语、简体中文、意大利语和俄语。
@@ -29,7 +29,7 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 
 - Zotero 9 或 Zotero 10。
 - [最新版本](https://github.com/pasiooooo/zotero-figure/releases/latest)中的 Zotero Figure XPI。
-- 仅公式 OCR 需要网络连接和 SiliconFlow API 密钥。
+- 仅公式 OCR 需要网络连接，以及 SiliconFlow 或自定义兼容 OpenAI 服务的 API 密钥。
 
 不需要 Java 或 `pdffigures2.jar`。
 
@@ -51,13 +51,15 @@ Zotero Figure 可检测 PDF 中的图、表、独立公式、说明和表格脚�
 - **图表库缩放：** 按住 Ctrl（Windows/Linux）或 Command（macOS）滚动鼠标滚轮，按滚动幅度连续调整；`+`/`-` 按比例缩放，`0` 恢复 100%。滑块及百分比输入框支持 1% 精度，范围为 10%–1000%。每帧合并更新，停止缩放后再调整瀑布流列数，最大化 Library 窗口同样适用。
 - **批量处理：** 在文库中选中文献条目或 PDF 附件，右键打开 `PDF Figure (pasiooooo) >`，可进行分析、写入笔记或创建标注。选中图片标注后选择“添加到 Figure”即可批量导入。
   开始前会列出已有解析记录的 PDF，可选择重新分析并覆盖、跳过这些 PDF 并继续处理其余文件，或取消整批任务。解析成功但未找到结果的 PDF 也会记为已解析。
-- **设置：** 打开 PDF Figure 设置页，可管理内置模型、标注同步和 SiliconFlow 公式 OCR，也可直接打开图表库；使用“转换已有公式”可处理所有文库中尚未缓存的公式。
+- **设置：** 打开 PDF Figure 设置页，可管理内置模型、标注同步和默认或自定义公式 OCR，也可直接打开图表库；使用“转换已有公式”可处理所有文库中尚未缓存的公式。
 
 ## 隐私
 
 PDF 解析、渲染、版面检测和本地结果存储均留在当前设备。除非开启标注镜像，本地结果不会使用 Zotero Sync。
 
-公式 OCR 为可选功能。检查 API 密钥只会向 SiliconFlow 发送纯文本请求；识别公式时只发送公式 PNG 裁图，不会发送整页 PDF。密钥保存在本机 Zotero 偏好设置中，SiliconFlow 调用可能产生费用。
+公式 OCR 为可选功能。在设置中点击“自定义”，可填写兼容 OpenAI Chat Completions 的 API 地址、密钥和支持图片输入的模型；地址支持基础 URL 或完整的 `/chat/completions` URL。“保存并检查”会自动发送纯文本请求检查连接，不验证图片识别能力，也可随时恢复 SiliconFlow 默认配置。识别公式时只向所配置的服务发送公式 PNG 裁图，不会发送整页 PDF。密钥保存在 Zotero 登录管理器中；旧偏好设置中的密钥在成功安全保存后迁移清除。API 调用可能产生费用。
+
+本分支的 API 密钥与原插件独立存储，不修改原插件保存的凭据。
 
 ## 相关链接
 

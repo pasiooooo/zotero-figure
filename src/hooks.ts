@@ -3,6 +3,7 @@ import type { FigureGalleryBatchAction } from "./domain/figureGallery";
 import {
   registerPrefs,
   registerPrefsScripts,
+  disposePrefsScripts,
 } from "./features/preferences/preferenceScript";
 import { FigureGalleryController } from "./features/gallery/figureGalleryController";
 import { FigureBatchController } from "./features/library/figureBatchController";
@@ -35,10 +36,13 @@ let unregisterShutdownFlush: (() => void) | undefined;
 
 async function onStartup(): Promise<void> {
   await waitForZotero();
+  if (!addon.data.alive) return;
   await migrateForkData();
+  if (!addon.data.alive) return;
   initLocale();
   await registerPrefs();
   await loadComparisonLayouts();
+  if (!addon.data.alive) return;
   unregisterShutdownFlush = registerApplicationShutdownTask(
     flushComparisonLayouts,
   );
@@ -115,6 +119,8 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 async function onShutdown(): Promise<void> {
+  addon.data.alive = false;
+  disposePrefsScripts();
   const initialized = services;
   initialized?.autoAnalysisController.dispose();
   initialized?.batchController.dispose();
@@ -139,7 +145,6 @@ async function onShutdown(): Promise<void> {
   services = undefined;
   ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  addon.data.alive = false;
   delete (Zotero as typeof Zotero & Record<string, unknown>)[
     config.addonInstance
   ];

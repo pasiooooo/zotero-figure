@@ -38,6 +38,13 @@ bridge is configured.
 `src/index.ts` establishes sandbox globals and creates the addon singleton.
 `src/hooks.ts` owns startup and shutdown:
 
+On Zotero 11 APP_STARTUP, bootstrap lets UI initialization continue in the
+background and reports its errors, so an unloaded library cannot hold up Zotero's
+sequential plugin queue. Enable/update and older-version startup remain awaited.
+The UI wait itself is retained; disabling the addon cancels the pending start.
+Fork data migration and comparison-layout loading also check the addon lifetime
+before startup can publish services.
+
 - one shared `FigureResultStore`, `LayoutAnalyzer`, `FigureGalleryIndex`, and
   `FigureBatchController` are used across main windows;
 - each main window receives its own `FigureReaderController` and
@@ -50,6 +57,30 @@ bridge is configured.
 Sharing the analyzer is important: its permit pools bound work across concurrent
 Readers as well as batch workflows. Batch attachments themselves are processed
 sequentially.
+
+Toolkit 6 is composed from `BasicTool`, `UITool`, `ProgressWindowHelper`,
+`DialogHelper`, and `FilePickerHelper`, without the legacy protocol bridges.
+The file picker retains the gallery and Reader batch-export contract: a selected
+directory or `false` on cancel; export copies remain non-overwriting. Context
+menus use Zotero 11's `MenuManager` or plugin-owned XUL menus on Zotero 9/10.
+The package compatibility declaration remains Zotero 9 through 10.
+
+## Formula OCR configuration
+
+Formula OCR uses SiliconFlow by default or a user-configured OpenAI-compatible
+Chat Completions service. Preferences and recognition read the same configuration;
+saving a custom URL, key, and model starts a text-only connection check. This
+check does not establish image support. Formula recognition sends only PNG crops
+to the selected service; PDF parsing, rendering, and layout detection remain local.
+
+API keys are stored through the Zotero login-manager adapter under this fork's
+`chrome://pasiofigure` origin, separately for the default and custom providers.
+Original-plugin credentials are never read, modified, or removed.
+Legacy SiliconFlow preference keys are cleared only
+after secure storage succeeds. URLs, model IDs, provider selection, and validation
+flags remain in preferences. Editing the active configuration invalidates its
+check and disables automatic recognition. Preference controllers abort pending
+checks and remove their event listeners on window unload or plugin shutdown.
 
 ## Gallery comparison persistence
 

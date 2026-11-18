@@ -22,7 +22,7 @@ Zotero Figure detects PDF figures, tables, display formulae, captions, and table
 - Comparison layouts are stored locally in `zotero-figure-pasiooooo/comparison-layouts.json` inside the Zotero data directory, allowing large comparison tables. Existing layouts migrate automatically; include this file in backups. Layouts are not synchronized by Zotero Sync.
 - Batch-analyze selected library items or PDF attachments, with optional note or Zotero annotation output.
 - Translate captions when Zotero PDF Translate is installed.
-- Optionally recognize formula LaTeX with SiliconFlow `Qwen/Qwen3.6-35B-A3B`, render it locally with KaTeX, and copy, re-recognize, or edit it with a CodeMirror source editor and live KaTeX preview.
+- Optionally recognize formula LaTeX with SiliconFlow `Qwen/Qwen3.6-35B-A3B` or a custom OpenAI-compatible service, render it locally with KaTeX, and copy, re-recognize, or edit it with a CodeMirror source editor and live KaTeX preview.
 - Create Zotero notes with embedded PNG images that link back to the source PDF.
 - Optionally mirror local results to Zotero image annotations for synchronization and interoperability.
 - Use the interface in English, Simplified Chinese, Italian, or Russian.
@@ -31,7 +31,7 @@ Zotero Figure detects PDF figures, tables, display formulae, captions, and table
 
 - Zotero 9 or Zotero 10.
 - The Zotero Figure XPI from the [latest release](https://github.com/pasiooooo/zotero-figure/releases/latest).
-- Formula OCR only: network access and a SiliconFlow API key.
+- Formula OCR only: network access and an API key for SiliconFlow or a custom OpenAI-compatible service.
 
 Java and `pdffigures2.jar` are not required.
 
@@ -55,13 +55,15 @@ Java and `pdffigures2.jar` are not required.
 - **Batch Processing:** Select library items or PDF attachments, right-click, and open `PDF Figure (pasiooooo) >` to analyze them, add results to notes, or create annotations. Select image annotations and choose `Add to Figure` for batch import.
   Before analysis, PDFs with saved results are listed for confirmation: reanalyze and replace them, skip them while processing new PDFs, or cancel the batch. Completed analyses with no detections also count as analyzed.
 - **Automatic PDF analysis:** Enable **Automatically analyze newly added PDFs** under Preferences → Other (off by default). Only new PDFs are queued, one document at a time; existing analyses are skipped. Missing local files are retried for about five minutes. Disabling the option cancels automatic work and clears pending tasks. Annotation sync and paid formula recognition retain their separate settings.
-- **Preferences:** Open the PDF Figure preferences pane to manage the bundled model, annotation synchronization, and SiliconFlow formula OCR, or to open the Figure Library directly. Use **Convert existing formulae** to recognize uncached formulae across libraries.
+- **Preferences:** Open the PDF Figure preferences pane to manage the bundled model, annotation synchronization, and default or custom formula OCR, or to open the Figure Library directly. Use **Convert existing formulae** to recognize uncached formulae across libraries.
 
 ## Privacy
 
 PDF parsing, rendering, layout detection, and local result storage stay on your computer. Local results do not use Zotero Sync unless you enable annotation mirroring.
 
-Formula OCR is optional. API-key checking sends a text-only request to SiliconFlow. Formula recognition sends formula PNG crops, never full PDF pages; the key is stored in local Zotero preferences. SiliconFlow usage may incur charges.
+Formula OCR is optional. In Preferences, choose **Customize** to set an OpenAI-compatible Chat Completions API URL, API key, and image-capable model. Base URLs and full `/chat/completions` URLs are accepted. **Save and check** automatically sends a text-only connection check; it does not verify image support. You can restore the SiliconFlow defaults at any time. Formula recognition sends formula PNG crops to the configured service, never full PDF pages. Keys are stored in Zotero’s login manager; existing preference keys are migrated after a successful secure save. API usage may incur charges.
+
+This fork stores API keys separately from the original plugin and never changes its saved credentials.
 
 ## Links
 

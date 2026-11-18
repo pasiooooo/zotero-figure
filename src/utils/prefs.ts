@@ -4,11 +4,18 @@ export interface PreferenceSchema {
   forkMigrationComplete: boolean;
   autoAnalyzeNewPdfs: boolean;
   autoRecognizeFormula: boolean;
+  /** Legacy plaintext key: read only for migration to the login manager. */
+  customFormulaApiKey: string;
+  customFormulaApiModel: string;
+  customFormulaApiURL: string;
+  customFormulaApiValidated: boolean;
   duplicateMode: "replace-page" | "skip-existing";
+  formulaApiProvider: "custom" | "siliconflow";
   /** Retired: migrated to the data directory by figureGalleryComparisonStore. */
   galleryComparisonLayouts: string;
   galleryImageScale: number;
   galleryViewMode: "document-columns" | "waterfall";
+  /** Legacy plaintext key: read only for migration to the login manager. */
   siliconFlowApiKey: string;
   siliconFlowApiKeyValidated: boolean;
   syncAnnotations: boolean;

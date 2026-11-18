@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.4] - 2026-11-18
+
+- 合并上游至 `62650b3`：Zotero 11 官方右键菜单与非阻塞启动、Toolkit 6.0.0、自定义公式 API、纯文本连接检查和登录管理器密钥存储。
+- 保留本分支的独立身份、更新地址、数据迁移、Library 工具栏及独立窗口、自动 PDF 分析和已有结果操作；密钥使用本分支独立命名空间，不读写原插件凭据。
+- 使用 Toolkit 6 的 `FilePickerHelper` 保留 PNG 批量导出，继续支持目录选择、取消和错误报告，不启用旧协议桥接。
+- 停用插件后，不再继续尚未完成的数据迁移启动流程；设置页的自动 PDF 分析监听器随插件关闭清理。
+- 安装兼容性声明仍为 Zotero 9–10；Zotero 11 的兼容代码已合入，但尚未完成实机验收并开放安装声明。
+- Import upstream through `62650b3` while retaining this fork's workflows and identity. Keep export support on Toolkit 6 and isolate secure API credentials from the original plugin.
+
 ## [1.1.3] - 2026-10-23
 
 ### 右键菜单与批注标签
