@@ -6,13 +6,15 @@
 
 推送版本标签后，`.github/workflows/release.yml` 会在 Node.js 22 上执行：
 
-1. `npm ci` 安装锁定依赖。
+1. `npm ci --onnxruntime-node-install-cuda=skip` 安装锁定依赖，跳过发布构建不使用的 CUDA 二进制下载。
 2. `npm run check` 检查格式、lint、类型、测试、脚本语法和构建资源。
 3. `npm run build` 生成 `build/zotero-figure.xpi` 和 `update.json`。
 4. `npm run release:prepare` 检查标签、包版本、锁文件、安装包 manifest 和更新清单，并提取对应 changelog。
 5. 使用仓库自带的 `GITHUB_TOKEN` 创建 Release，上传 XPI 和更新清单，并将其设为最新稳定版。
 
 不需要额外的发布令牌或 npm 发布权限。仓库必须启用 GitHub Actions，且仓库或组织策略允许工作流请求 `contents: write`。发布失败时查看 Actions 日志，修复后重跑失败的工作流；不要移动已公开发布的标签。
+
+插件在 Zotero 中使用 ONNX Web/WASM 运行时，发布构建不需要 `onnxruntime-node` 的 CUDA 执行后端。若已推送的标签因发布流程失败，修复 `bootstrap` 上的工作流后使用下方手动入口重新发布原标签，保留标签指向不变。
 
 若标签已推送但没有产生运行记录，可在 Actions → Release → Run workflow 中输入已有标签，或在 GitHub CLI 登录后执行：
 
