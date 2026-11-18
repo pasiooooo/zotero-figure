@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.5] - 2026-11-18
+
+- 修复 Library 独立窗口的右键菜单失效：从当前页面的宿主窗口创建原生菜单，挂载到该窗口的弹出层，不再使用后台 Zotero 主窗口或浏览器元素。
+- 保留 Library 的 PNG 导出、添加批注、全选、清除选择、删除及比较分组操作；不修改阅读器图片卡片菜单、Toolkit 6 或插件数据。
+- 增加独立窗口菜单归属、菜单命令、关闭清理、旧宿主回退及异步取消的回归测试。
+- Fix the standalone Library context menu by creating and mounting its native popup in the current viewer window. Preserve existing Library actions and leave Reader card menus unchanged.
+
 ## [1.1.4] - 2026-11-18
 
 - 合并上游至 `62650b3`：Zotero 11 官方右键菜单与非阻塞启动、Toolkit 6.0.0、自定义公式 API、纯文本连接检查和登录管理器密钥存储。

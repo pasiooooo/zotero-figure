@@ -509,6 +509,12 @@ test("supports native grouping menus and primary-image selection", () => {
     "\nfunction createGalleryMenuItem(",
   );
   assert.match(contextMenu, /Zotero\.getMainWindow\(\)/);
+  assert.match(contextMenu, /window\.docShell\?\.chromeEventHandler/);
+  assert.match(contextMenu, /ownerDocument\.querySelector\("popupset"\)/);
+  assert.doesNotMatch(
+    contextMenu,
+    /ownerDocument\.querySelector\("#browser"\)/,
+  );
   assert.match(contextMenu, /createXULElement\(\s*"menupopup"/);
   assert.match(contextMenu, /createXULElement\("menu"\)/);
   assert.match(

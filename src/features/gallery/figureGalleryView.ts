@@ -967,8 +967,9 @@ async function openGalleryContextMenu(
     groupRows.map((row, index) => [row.id, rowLabels[index]!] as const),
   );
 
-  const ownerWindow = Zotero.getMainWindow();
-  const ownerDocument = ownerWindow.document;
+  const ownerDocument =
+    (window.docShell?.chromeEventHandler as Element | undefined)
+      ?.ownerDocument ?? Zotero.getMainWindow().document;
   const popup = ownerDocument.createXULElement(
     "menupopup",
   ) as GalleryContextMenuPopup;
@@ -1077,7 +1078,7 @@ async function openGalleryContextMenu(
     ),
   );
   const container =
-    ownerDocument.querySelector("#browser") ?? ownerDocument.documentElement;
+    ownerDocument.querySelector("popupset") ?? ownerDocument.documentElement;
   container.append(popup);
   galleryContextMenu = popup;
   popup.addEventListener("popuphidden", (event) => {
