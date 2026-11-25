@@ -15,6 +15,7 @@ export type Rect = [number, number, number, number];
 export interface PdfCharacter {
   c: string;
   rect: Rect;
+  mathStyle?: boolean;
   lineBreakAfter?: boolean;
   spaceAfter?: boolean;
 }
@@ -43,6 +44,7 @@ export interface AnnotationCandidate {
 
 interface Caption {
   bottom: number;
+  element?: LayoutElement;
   left: number;
   number: string;
   right: number;
@@ -63,7 +65,9 @@ const MATHEMATICAL_PAGE_HINT = /[=∑∫√±≤≥≈≠]/;
 const CAPTION_PADDING = 5;
 const MAX_CAPTION_DISTANCE_RATIO = 0.3;
 const MAX_FOOTNOTE_DISTANCE_RATIO = 0.2;
-const MAX_FORMULA_CAPTION_DISTANCE_RATIO = 0.25;
+const MAX_FORMULA_CAPTION_DISTANCE_RATIO = 0.5;
+const FORMULA_NUMBER_LABEL =
+  /^[（(]?\s*[A-Z]?\d+(?:[.\-‐‑–—]\d+)*[a-z]?\s*[）)]?$/i;
 
 export function charsToText(chars: readonly PdfCharacter[]): string {
   const text: string[] = [];
@@ -106,11 +110,20 @@ export function buildAnnotationCandidates(
   page: PageLayoutData,
   includeUncaptioned = false,
 ): AnnotationCandidate[] {
+  const formulae = matchFormulae(page);
+  const subjectPage = {
+    ...page,
+    elements: page.elements.filter(
+      (element) => !formulae.numberElements.has(element),
+    ),
+  };
   const candidates: AnnotationCandidate[] = [];
   for (const subjectType of ["figure", "table"] as const) {
-    candidates.push(...matchSubjectType(page, subjectType, includeUncaptioned));
+    candidates.push(
+      ...matchSubjectType(subjectPage, subjectType, includeUncaptioned),
+    );
   }
-  candidates.push(...matchFormulae(page));
+  candidates.push(...formulae.candidates);
   return candidates;
 }
 
@@ -179,38 +192,157 @@ function matchSubjectType(
   return candidates;
 }
 
-function matchFormulae(page: PageLayoutData): AnnotationCandidate[] {
-  const captions = collectCaptions(page, "formula_caption");
-  const usedCaptions = new Set<number>();
+export function matchFormulae(page: PageLayoutData): {
+  candidates: AnnotationCandidate[];
+  numberElements: Set<LayoutElement>;
+  labels: Map<AnnotationCandidate, Rect>;
+} {
   const candidates: AnnotationCandidate[] = [];
+  const numberElements = new Set<LayoutElement>();
+  const labels = new Map<AnnotationCandidate, Rect>();
+  const result = { candidates, numberElements, labels };
+  const formulae = page.elements.filter(
+    (element) => element.type === "isolate_formula",
+  );
+  if (!formulae.length) return result;
+  const numberCaptions = (
+    ["figure", "figure_caption", "isolate_formula"] as const
+  )
+    .flatMap((type) => collectTextRegions(page, type, 0))
+    .filter((caption) => FORMULA_NUMBER_LABEL.test(caption.text));
+  const numberBoxes = new Set(numberCaptions.map((caption) => caption.element));
+  const printedNumbers = printedEquationNumbers(page);
+  const captions = [
+    ...collectTextRegions(page, "formula_caption", 0),
+    ...numberCaptions,
+    ...printedNumbers,
+  ];
+  const usedCaptions = new Set<number>();
 
-  for (const element of page.elements) {
-    if (element.type !== "isolate_formula") continue;
+  for (const element of [
+    ...formulae.filter((box) => !numberBoxes.has(box)),
+    ...formulae.filter((box) => numberBoxes.has(box)),
+  ]) {
+    if (numberElements.has(element)) continue;
     const subject = toPdfRect(element.xyxy, page.width, page.height);
     const captionIndex = findClosestFormulaCaption(
       subject,
       captions,
       usedCaptions,
-      page.width,
+      page,
     );
-    const caption =
+    const detected =
       captionIndex === undefined ? undefined : captions[captionIndex];
-    if (captionIndex !== undefined) usedCaptions.add(captionIndex);
-    const crop = caption ? unionRects(subject, caption) : subject;
+    const caption =
+      detected &&
+      (printedNumbers.find((printed) => captionsOverlap(printed, detected)) ??
+        detected);
+    if (captionIndex !== undefined && caption) {
+      usedCaptions.add(captionIndex);
+      captions.forEach((numberCaption, index) => {
+        if (
+          numberCaption === detected ||
+          (captionsOverlap(numberCaption, caption) &&
+            numberCaption.top - numberCaption.bottom <=
+              2 * (caption.top - caption.bottom) + CAPTION_PADDING &&
+            numberCaption.right - numberCaption.left <=
+              2 * (caption.right - caption.left) + CAPTION_PADDING)
+        ) {
+          usedCaptions.add(index);
+          if (
+            numberCaption.element &&
+            numberCaption.element.type !== "formula_caption"
+          )
+            numberElements.add(numberCaption.element);
+        }
+      });
+    }
     const [xMin, yMin] = page.viewBox;
-    candidates.push({
+    const candidate: AnnotationCandidate = {
       comment: caption?.text ?? "",
       pageIndex: page.pageIndex,
       rect: [
-        roundCoordinate(crop[0] + xMin),
-        roundCoordinate(crop[1] + yMin),
-        roundCoordinate(crop[2] + xMin),
-        roundCoordinate(crop[3] + yMin),
+        roundCoordinate(subject[0] + xMin),
+        roundCoordinate(subject[1] + yMin),
+        roundCoordinate(subject[2] + xMin),
+        roundCoordinate(subject[3] + yMin),
       ],
       tag: `Formula ${caption?.number ?? ""}`.trim(),
-    });
+    };
+    candidates.push(candidate);
+    if (caption)
+      labels.set(candidate, [
+        caption.left + xMin,
+        caption.bottom + yMin,
+        caption.right + xMin,
+        caption.top + yMin,
+      ]);
   }
-  return candidates;
+  return result;
+}
+
+function printedEquationNumbers(page: PageLayoutData): Caption[] {
+  const printed: Caption[] = [];
+  let run: PdfCharacter[] = [];
+  const flush = () => {
+    const text = run
+      .map((char) => char.c)
+      .join("")
+      .trim();
+    if (
+      text.length <= 32 &&
+      /^[（(].+[）)]$/.test(text) &&
+      FORMULA_NUMBER_LABEL.test(text)
+    ) {
+      const ink = run.filter((char) => char.c.trim());
+      const [xMin, yMin] = page.viewBox;
+      const left = Math.min(...ink.map((char) => char.rect[0])) - xMin;
+      const right = Math.max(...ink.map((char) => char.rect[2])) - xMin;
+      const bottom = Math.min(...ink.map((char) => char.rect[1])) - yMin;
+      const top = Math.max(...ink.map((char) => char.rect[3])) - yMin;
+      const insideGraphic = page.elements.some((element) => {
+        if (element.type !== "figure" && element.type !== "table") return false;
+        const rect = toPdfRect(element.xyxy, page.width, page.height);
+        return (
+          (rect[3] - rect[1] > 2.5 * (top - bottom) ||
+            rect[2] - rect[0] > 2 * (right - left + top - bottom)) &&
+          left >= rect[0] - 1 &&
+          right <= rect[2] + 1 &&
+          bottom >= rect[1] - 1 &&
+          top <= rect[3] + 1
+        );
+      });
+      if (!insideGraphic)
+        printed.push({
+          left,
+          right,
+          bottom,
+          top,
+          text,
+          number: extractFigureNumber(text),
+        });
+    }
+    run = [];
+  };
+  for (const char of page.chars) {
+    const previous = run[run.length - 1];
+    if (
+      previous &&
+      char.rect[0] - previous.rect[2] > 2 * (char.rect[3] - char.rect[1])
+    )
+      flush();
+    run.push(char);
+    if (char.lineBreakAfter) flush();
+  }
+  if (run.length) flush();
+  return printed;
+}
+
+function captionsOverlap(first: Caption, second: Caption): boolean {
+  return (
+    Math.min(first.right, second.right) > Math.max(first.left, second.left) &&
+    Math.min(first.top, second.top) > Math.max(first.bottom, second.bottom)
+  );
 }
 
 function collectCaptions(
@@ -223,10 +355,13 @@ function collectCaptions(
 function collectTextRegions(
   page: PageLayoutData,
   regionType:
+    | "figure"
     | "figure_caption"
+    | "isolate_formula"
     | "formula_caption"
     | "table_caption"
     | "table_footnote",
+  padding = CAPTION_PADDING,
 ): Caption[] {
   return page.elements
     .filter((element) => element.type === regionType)
@@ -244,10 +379,11 @@ function collectTextRegions(
           right + page.viewBox[0],
           top + page.viewBox[1],
         ],
-        CAPTION_PADDING,
+        padding,
       );
       return {
         bottom,
+        element,
         left,
         number: extractFigureNumber(text),
         right,
@@ -289,37 +425,81 @@ function findClosestFormulaCaption(
   subject: Rect,
   captions: readonly Caption[],
   usedCaptions: ReadonlySet<number>,
-  pageWidth: number,
+  page: PageLayoutData,
 ): number | undefined {
   let closestIndex: number | undefined;
   let closestDistance = Number.POSITIVE_INFINITY;
   captions.forEach((caption, index) => {
     if (usedCaptions.has(index)) return;
-    const verticalGap = Math.max(
-      0,
-      caption.bottom - subject[3],
-      subject[1] - caption.top,
-    );
     const subjectHeight = subject[3] - subject[1];
     const captionHeight = caption.top - caption.bottom;
+    const centerY = (caption.top + caption.bottom) / 2;
     if (
-      verticalGap >
-      Math.max(subjectHeight, captionHeight) + CAPTION_PADDING
-    ) {
+      centerY < subject[1] - 1 ||
+      centerY > subject[3] + 1 ||
+      captionHeight > subjectHeight + CAPTION_PADDING ||
+      (caption.left <
+        subject[2] - Math.min(CAPTION_PADDING, captionHeight / 2) &&
+        caption.right >
+          subject[0] + Math.min(CAPTION_PADDING, captionHeight / 2))
+    )
       return;
-    }
     const horizontalGap = Math.max(
       0,
       caption.left - subject[2],
       subject[0] - caption.right,
     );
+    const distance =
+      Math.abs(centerY - (subject[1] + subject[3]) / 2) +
+      horizontalGap / page.width +
+      (caption.number ? 0 : subjectHeight);
     if (
-      horizontalGap > pageWidth * MAX_FORMULA_CAPTION_DISTANCE_RATIO ||
-      horizontalGap >= closestDistance
-    ) {
+      horizontalGap > page.width * MAX_FORMULA_CAPTION_DISTANCE_RATIO ||
+      distance >= closestDistance
+    )
       return;
+    if (horizontalGap > CAPTION_PADDING) {
+      const [xMin, yMin] = page.viewBox;
+      const gap: Rect =
+        caption.left >= subject[2]
+          ? [
+              subject[2] + xMin + 1,
+              caption.bottom + yMin,
+              caption.left + xMin - 1,
+              caption.top + yMin,
+            ]
+          : [
+              caption.right + xMin + 1,
+              caption.bottom + yMin,
+              subject[0] + xMin - 1,
+              caption.top + yMin,
+            ];
+      if (
+        page.chars.some(
+          (char) => char.c.trim() && isCharacterCenteredInRect(char, gap),
+        )
+      )
+        return;
+      if (
+        page.elements.some((element) => {
+          if (
+            element.type !== "isolate_formula" &&
+            element.type !== "table" &&
+            element.type !== "figure"
+          )
+            return false;
+          const rect = toPdfRect(element.xyxy, page.width, page.height);
+          return (
+            rect[0] + xMin >= gap[0] &&
+            rect[2] + xMin <= gap[2] &&
+            rect[1] <= centerY &&
+            rect[3] >= centerY
+          );
+        })
+      )
+        return;
     }
-    closestDistance = horizontalGap;
+    closestDistance = distance;
     closestIndex = index;
   });
   return closestIndex;
@@ -337,10 +517,10 @@ function unionRects(first: Rect, second: Caption | Rect): Rect {
   ];
 }
 
-function isCharacterCenteredInRect(
+export function isCharacterCenteredInRect(
   char: PdfCharacter,
   rect: Rect,
-  padding: number,
+  padding = 0,
 ): boolean {
   const [left, bottom, right, top] = rect;
   const centerX = (char.rect[0] + char.rect[2]) / 2;

@@ -193,7 +193,7 @@ test("includes the nearest table footnote in its text and crop", () => {
   });
 });
 
-test("matches formula numbers and keeps unnumbered isolated formulae", () => {
+test("keeps formula numbers as metadata while cropping only formula bodies", () => {
   const page = createPage({
     chars: [character("(7)", [805, 525, 855, 575])],
     elements: [
@@ -219,7 +219,7 @@ test("matches formula numbers and keeps unnumbered isolated formulae", () => {
     {
       comment: "(7)",
       pageIndex: 2,
-      rect: [210, 520, 870, 620],
+      rect: [210, 520, 760, 620],
       tag: "Formula 7",
     },
     {
@@ -229,6 +229,160 @@ test("matches formula numbers and keeps unnumbered isolated formulae", () => {
       tag: "Formula",
     },
   ]);
+});
+
+test("recovers equation numbers misclassified as figures or figure captions without creating number images", () => {
+  for (const type of ["figure", "figure_caption"]) {
+    for (const [text, number] of [
+      ["(7)", "7"],
+      ["（2.1）", "2.1"],
+      ["1-10", "1-10"],
+      ["(S3a)", "S3a"],
+    ]) {
+      const page = createPage({
+        chars: [character(text, [815, 545, 855, 585])],
+        elements: [
+          { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.4, 0.75, 0.5] },
+          { score: 0.9, type, xyxy: [0.8, 0.42, 0.86, 0.48] },
+        ],
+      });
+      assert.deepEqual(buildAnnotationCandidates(page, true), [
+        {
+          comment: text,
+          pageIndex: 2,
+          rect: [210, 520, 760, 620],
+          tag: `Formula ${number}`,
+        },
+      ]);
+    }
+  }
+});
+
+test("does not emit a number image when its box also has a formula-caption detection", () => {
+  const page = createPage({
+    chars: [character("(7)", [815, 545, 855, 585])],
+    elements: [
+      { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.4, 0.75, 0.5] },
+      { score: 0.9, type: "figure", xyxy: [0.8, 0.42, 0.86, 0.48] },
+      { score: 0.9, type: "formula_caption", xyxy: [0.79, 0.41, 0.87, 0.49] },
+    ],
+  });
+  assert.deepEqual(buildAnnotationCandidates(page, true), [
+    {
+      comment: "(7)",
+      pageIndex: 2,
+      rect: [210, 520, 760, 620],
+      tag: "Formula 7",
+    },
+  ]);
+});
+
+test("does not reuse duplicate equation-number detections for a second formula", () => {
+  const page = createPage({
+    chars: [character("(7)", [815, 545, 855, 585])],
+    elements: [
+      { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.4, 0.75, 0.5] },
+      { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.52, 0.75, 0.62] },
+      { score: 0.9, type: "figure", xyxy: [0.8, 0.42, 0.86, 0.48] },
+      { score: 0.9, type: "figure_caption", xyxy: [0.8, 0.42, 0.86, 0.48] },
+      { score: 0.9, type: "formula_caption", xyxy: [0.79, 0.41, 0.87, 0.49] },
+    ],
+  });
+  const candidates = buildAnnotationCandidates(page, true);
+  assert.equal(candidates.length, 2);
+  assert.equal(candidates[0].tag, "Formula 7");
+  assert.equal(candidates[1].tag, "Formula");
+  assert.equal(candidates[1].comment, "");
+});
+
+test("recovers a distant standalone printed number on the same row without crossing intervening text", () => {
+  const page = createPage({
+    chars: [
+      {
+        c: "AIC = 2k − 2LLK",
+        rect: [462, 530, 576, 545],
+        lineBreakAfter: true,
+      },
+      { c: "(", rect: [910, 530, 914, 545] },
+      { c: "6", rect: [914, 530, 920, 545] },
+      { c: ")", rect: [920, 530, 924, 545], lineBreakAfter: true },
+    ],
+    elements: [
+      { score: 0.9, type: "isolate_formula", xyxy: [0.45, 0.47, 0.57, 0.5] },
+    ],
+  });
+  assert.deepEqual(
+    buildAnnotationCandidates(page).map((candidate) => [
+      candidate.tag,
+      candidate.comment,
+    ]),
+    [["Formula 6", "(6)"]],
+  );
+  page.chars.splice(1, 0, {
+    c: "other column",
+    rect: [676, 530, 763, 545],
+    lineBreakAfter: true,
+  });
+  assert.equal(buildAnnotationCandidates(page)[0].tag, "Formula");
+  page.chars.splice(1, 1);
+  page.elements.push({
+    score: 0.9,
+    type: "figure",
+    xyxy: [0.65, 0.46, 0.72, 0.5],
+  });
+  assert.equal(buildAnnotationCandidates(page).at(-1)?.tag, "Formula");
+});
+
+test("keeps both parentheses from the text line when the model label clips the last character", () => {
+  const page = createPage({
+    chars: [
+      { c: "A=B", rect: [460, 530, 576, 545], lineBreakAfter: true },
+      { c: "(", rect: [910, 530, 914, 545] },
+      { c: "5", rect: [914, 530, 920, 545] },
+      { c: ")", rect: [920, 530, 925, 545], lineBreakAfter: true },
+    ],
+    elements: [
+      { score: 0.9, type: "isolate_formula", xyxy: [0.45, 0.47, 0.57, 0.5] },
+      {
+        score: 0.9,
+        type: "formula_caption",
+        xyxy: [0.899, 0.474, 0.909, 0.491],
+      },
+    ],
+  });
+  const [formula] = buildAnnotationCandidates(page);
+  assert.equal(formula.comment, "(5)");
+  assert.equal(formula.tag, "Formula 5");
+});
+
+test("keeps numerical figures inside a formula, in another row or larger than a number label", () => {
+  for (const [xyxy, textRect] of [
+    [
+      [0.3, 0.43, 0.36, 0.48],
+      [315, 545, 355, 575],
+    ],
+    [
+      [0.8, 0.7, 0.86, 0.76],
+      [815, 265, 855, 305],
+    ],
+    [
+      [0.8, 0.3, 0.98, 0.7],
+      [815, 445, 855, 485],
+    ],
+  ] as Array<[PdfCharacter["rect"], PdfCharacter["rect"]]>) {
+    const page = createPage({
+      chars: [character("(7)", textRect)],
+      elements: [
+        { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.4, 0.75, 0.5] },
+        { score: 0.9, type: "figure", xyxy },
+      ],
+    });
+    const candidates = buildAnnotationCandidates(page, true);
+    assert.equal(candidates.length, 2);
+    assert.equal(candidates[0].tag, "Figure");
+    assert.equal(candidates[1].tag, "Formula");
+    assert.equal(candidates[1].comment, "");
+  }
 });
 
 test("does not reuse one caption for multiple detected subjects", () => {

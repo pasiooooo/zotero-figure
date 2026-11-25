@@ -1,6 +1,8 @@
 import { config } from "../../../package.json";
 import type { DuplicateMode } from "../../domain/figureResults";
 import { containsResultRegion } from "../../domain/resultRegion";
+import { isInlineFormulaSelection } from "../../domain/inlineFormula";
+import { recoverRegionFormulae } from "../../domain/regionFormulae";
 import {
   buildAnnotationCandidates,
   extractTextInRect,
@@ -66,6 +68,11 @@ export interface AnalysisOptions {
   syncAnnotations?: boolean;
 }
 
+export interface RegionAnalysisOptions extends AnalysisOptions {
+  kind?: "formula";
+  comment?: string;
+}
+
 export interface ResultCorrectionPreview {
   detectedRect: Rect;
   image: ArrayBuffer;
@@ -129,7 +136,7 @@ export class LayoutAnalyzer {
     attachment: Zotero.Item,
     pageIndex: number,
     rect: Rect,
-    options: AnalysisOptions = {},
+    options: RegionAnalysisOptions = {},
   ): Promise<PageAnalysisOutcome> {
     if (this.disposed) throw new OperationCancelledError();
     if (
@@ -158,25 +165,8 @@ export class LayoutAnalyzer {
         getAttachmentAnalysisKey(attachment),
         signal,
       );
-      const [validation] = await Promise.all([
-        modelManager.ensureRecommendedModel({ signal }),
-        this.pdfEngine.prepare(signal),
-      ]);
+      await this.pdfEngine.prepare(signal);
       throwIfAborted(signal);
-      if (validation.state !== "valid") {
-        throw new Error(
-          getString(
-            validation.state === "missing"
-              ? "error-model-file-unavailable"
-              : "error-model-integrity",
-          ),
-        );
-      }
-      const workerPool = this.getWorkerPool(
-        validation.path,
-        validation.variant,
-      );
-      await workerPool.prepare(signal);
       const source = await this.resultStore.getSourceFingerprint(
         attachment,
         signal,
@@ -194,6 +184,27 @@ export class LayoutAnalyzer {
       ];
       if (region[2] <= region[0] || region[3] <= region[1]) {
         throw new Error("Recognition region is outside the PDF page");
+      }
+      throwIfAborted(signal);
+      const selectedFormula =
+        options.kind === "formula" ||
+        isInlineFormulaSelection(page.chars, region);
+      let workerPool: LayoutWorkerPool | undefined;
+      if (!selectedFormula) {
+        const validation = await modelManager.ensureRecommendedModel({
+          signal,
+        });
+        throwIfAborted(signal);
+        if (validation.state !== "valid")
+          throw new Error(
+            getString(
+              validation.state === "missing"
+                ? "error-model-file-unavailable"
+                : "error-model-integrity",
+            ),
+          );
+        workerPool = this.getWorkerPool(validation.path, validation.variant);
+        await workerPool.prepare(signal);
       }
       return await this.processPage(
         attachment,
@@ -213,6 +224,14 @@ export class LayoutAnalyzer {
         options.annotationReader ?? attachment,
         signal,
         region,
+        selectedFormula
+          ? {
+              pageIndex,
+              rect: region,
+              tag: "Formula",
+              comment: options.comment ?? "",
+            }
+          : undefined,
       );
     } finally {
       try {
@@ -650,7 +669,7 @@ export class LayoutAnalyzer {
   private async processPage(
     attachment: Zotero.Item,
     pdfDocument: PdfAnalysisDocument,
-    workerPool: LayoutWorkerPool,
+    workerPool: LayoutWorkerPool | undefined,
     page: Omit<PageLayoutData, "elements"> &
       Pick<PdfAnalysisPageData, "pageBounds" | "pageToPdf"> & {
         fullPageBounds?: Rect;
@@ -661,118 +680,142 @@ export class LayoutAnalyzer {
     annotationTarget?: AnnotationTarget,
     signal?: AbortSignal,
     region?: Rect,
+    explicitCandidate?: AnnotationCandidate,
   ): Promise<PageAnalysisOutcome> {
     const telemetry = new PageAnalysisTelemetry();
     const timings = telemetry.timings;
     try {
-      const detectionWaitStartedAt = Date.now();
-      const releaseDetection = await this.detectionPages.acquire(signal);
-      timings.detectionStageWaitMs = Date.now() - detectionWaitStartedAt;
       let candidates: AnnotationCandidate[];
-      try {
-        const renderWaitStartedAt = Date.now();
-        const releaseRender = await this.pdfRenders.acquire(signal);
-        timings.detectionRenderWaitMs = Date.now() - renderWaitStartedAt;
-        let image: ArrayBuffer;
+      if (explicitCandidate) {
+        candidates = [explicitCandidate];
+      } else {
+        if (!workerPool) throw new Error("Layout worker is unavailable");
+        const detectionWaitStartedAt = Date.now();
+        const releaseDetection = await this.detectionPages.acquire(signal);
+        timings.detectionStageWaitMs = Date.now() - detectionWaitStartedAt;
         try {
-          const rendered = region
-            ? await pdfDocument.renderRegions(page.pageIndex, [region], signal)
-            : await pdfDocument.renderDetectionImage(page.pageIndex, signal);
-          image = "image" in rendered ? rendered.image : rendered.images[0];
-          if (!image?.byteLength)
-            throw new Error("Recognition image was not rendered");
-          timings.renderingMs = rendered.renderMs + rendered.encodeMs;
-        } finally {
-          releaseRender();
-        }
-        await yieldToUI(signal);
-        const detectionStartedAt = Date.now();
-        const detection = await workerPool.detectWithTiming(
-          image,
-          page.pageIndex,
-          signal,
-        );
-        const elements = mapLayoutElementsToPdf(detection.elements, page);
-        timings.workerDecodeMs = detection.timings.decodeMs;
-        timings.workerQueueMs = detection.timings.queueMs;
-        timings.preprocessMs = detection.timings.preprocessMs;
-        timings.inferenceMs = detection.timings.inferenceMs;
-        timings.postprocessMs = detection.timings.postprocessMs;
-        timings.workerTotalMs = detection.timings.totalMs;
-        timings.detectionMs = Date.now() - detectionStartedAt;
-        candidates = buildAnnotationCandidates(
-          { ...page, elements },
-          Boolean(region),
-        ).filter(({ rect }) => !region || containsResultRegion(region, rect));
-        if (region && page.fullPageBounds && page.chars.length > 0) {
-          const captioned = buildAnnotationCandidates({ ...page, elements });
-          const needsCaption = (candidate: AnnotationCandidate) =>
-            !candidate.tag.startsWith("Formula") &&
-            (!candidate.comment.trim() ||
-              !captioned.some((other) =>
-                other.rect.every(
-                  (value, index) => value === candidate.rect[index],
-                ),
-              ));
-          if (candidates.some(needsCaption)) {
-            // A tight crop can hide the caption or remove the context the layout model needs.
-            const waitStartedAt = Date.now();
-            const releaseContextRender = await this.pdfRenders.acquire(signal);
-            timings.detectionRenderWaitMs += Date.now() - waitStartedAt;
-            try {
-              const rendered = await pdfDocument.renderDetectionImage(
-                page.pageIndex,
-                signal,
-              );
-              image = rendered.image;
-              timings.renderingMs += rendered.renderMs + rendered.encodeMs;
-            } finally {
-              releaseContextRender();
-            }
-            const contextStartedAt = Date.now();
-            const context = await workerPool.detectWithTiming(
-              image,
-              page.pageIndex,
-              signal,
-            );
-            timings.detectionMs += Date.now() - contextStartedAt;
-            timings.workerDecodeMs += context.timings.decodeMs;
-            timings.workerQueueMs += context.timings.queueMs;
-            timings.preprocessMs += context.timings.preprocessMs;
-            timings.inferenceMs += context.timings.inferenceMs;
-            timings.postprocessMs += context.timings.postprocessMs;
-            timings.workerTotalMs += context.timings.totalMs;
-            const isCaption = ({ type }: PageLayoutData["elements"][number]) =>
-              type === "figure_caption" || type === "table_caption";
-            const contextElements = mapLayoutElementsToPdf(context.elements, {
-              ...page,
-              pageBounds: page.fullPageBounds,
-            }).filter(isCaption);
-            const recovered = buildAnnotationCandidates(
-              {
-                ...page,
-                elements: [
-                  ...elements.filter((element) => !isCaption(element)),
-                  ...contextElements,
-                ],
-              },
-              true,
-            );
-            candidates = candidates.map((candidate) => {
-              if (!needsCaption(candidate)) return candidate;
-              const match = recovered.find(
-                (other) =>
-                  other.comment.trim() &&
+          const renderWaitStartedAt = Date.now();
+          const releaseRender = await this.pdfRenders.acquire(signal);
+          timings.detectionRenderWaitMs = Date.now() - renderWaitStartedAt;
+          let image: ArrayBuffer;
+          try {
+            const rendered = region
+              ? await pdfDocument.renderRegions(
+                  page.pageIndex,
+                  [region],
+                  signal,
+                )
+              : await pdfDocument.renderDetectionImage(page.pageIndex, signal);
+            image = "image" in rendered ? rendered.image : rendered.images[0];
+            if (!image?.byteLength)
+              throw new Error("Recognition image was not rendered");
+            timings.renderingMs = rendered.renderMs + rendered.encodeMs;
+          } finally {
+            releaseRender();
+          }
+          await yieldToUI(signal);
+          const detectionStartedAt = Date.now();
+          const detection = await workerPool.detectWithTiming(
+            image,
+            page.pageIndex,
+            signal,
+          );
+          const elements = mapLayoutElementsToPdf(detection.elements, page);
+          timings.workerDecodeMs = detection.timings.decodeMs;
+          timings.workerQueueMs = detection.timings.queueMs;
+          timings.preprocessMs = detection.timings.preprocessMs;
+          timings.inferenceMs = detection.timings.inferenceMs;
+          timings.postprocessMs = detection.timings.postprocessMs;
+          timings.workerTotalMs = detection.timings.totalMs;
+          timings.detectionMs = Date.now() - detectionStartedAt;
+          candidates = buildAnnotationCandidates(
+            { ...page, elements },
+            Boolean(region),
+          ).filter(({ rect }) => !region || containsResultRegion(region, rect));
+          if (region && page.fullPageBounds) {
+            const captioned = buildAnnotationCandidates({ ...page, elements });
+            const needsCaption = (candidate: AnnotationCandidate) =>
+              !candidate.tag.startsWith("Formula") &&
+              (!candidate.comment.trim() ||
+                !captioned.some((other) =>
                   other.rect.every(
                     (value, index) => value === candidate.rect[index],
                   ),
+                ));
+            if (
+              !candidates.length ||
+              candidates.some(
+                (candidate) =>
+                  needsCaption(candidate) ||
+                  (candidate.tag.startsWith("Formula") && !candidate.comment),
+              )
+            ) {
+              // A tight crop can hide the caption or remove the context the layout model needs.
+              const waitStartedAt = Date.now();
+              const releaseContextRender =
+                await this.pdfRenders.acquire(signal);
+              timings.detectionRenderWaitMs += Date.now() - waitStartedAt;
+              try {
+                const rendered = await pdfDocument.renderDetectionImage(
+                  page.pageIndex,
+                  signal,
+                );
+                image = rendered.image;
+                timings.renderingMs += rendered.renderMs + rendered.encodeMs;
+              } finally {
+                releaseContextRender();
+              }
+              const contextStartedAt = Date.now();
+              const context = await workerPool.detectWithTiming(
+                image,
+                page.pageIndex,
+                signal,
               );
-              return match ?? candidate;
-            });
+              timings.detectionMs += Date.now() - contextStartedAt;
+              timings.workerDecodeMs += context.timings.decodeMs;
+              timings.workerQueueMs += context.timings.queueMs;
+              timings.preprocessMs += context.timings.preprocessMs;
+              timings.inferenceMs += context.timings.inferenceMs;
+              timings.postprocessMs += context.timings.postprocessMs;
+              timings.workerTotalMs += context.timings.totalMs;
+              const isCaption = ({
+                type,
+              }: PageLayoutData["elements"][number]) =>
+                type === "figure_caption" || type === "table_caption";
+              const contextElements = mapLayoutElementsToPdf(context.elements, {
+                ...page,
+                pageBounds: page.fullPageBounds,
+              });
+              const recovered = buildAnnotationCandidates(
+                {
+                  ...page,
+                  elements: [
+                    ...elements.filter((element) => !isCaption(element)),
+                    ...contextElements.filter(isCaption),
+                  ],
+                },
+                true,
+              );
+              candidates = recoverRegionFormulae(
+                { ...page, elements: contextElements },
+                region,
+                candidates,
+              ).map((candidate) => {
+                if (!needsCaption(candidate)) return candidate;
+                const match = recovered.find(
+                  (other) =>
+                    other.comment.trim() &&
+                    other.rect.every(
+                      (value, index) => value === candidate.rect[index],
+                    ),
+                );
+                return match ?? candidate;
+              });
+            }
           }
+        } finally {
+          releaseDetection();
         }
-      } finally {
-        releaseDetection();
       }
       throwIfAborted(signal);
       if (region && candidates.length === 0) {
@@ -926,7 +969,7 @@ export class LayoutAnalyzer {
     } catch (error) {
       if (isCancellationError(error)) throw error;
       if (region) throw error;
-      if (workerPool.isDisposed) throw error;
+      if (workerPool?.isDisposed) throw error;
       ztoolkit.log(
         `Layout analysis failed on page ${page.pageIndex + 1}`,
         error,

@@ -302,7 +302,9 @@ export class FigureReaderController {
 
   private async runAnalysis(
     reader: PdfReader,
-    regions?: readonly Pick<AnnotationCandidate, "pageIndex" | "rect">[],
+    regions?: readonly (Pick<AnnotationCandidate, "pageIndex" | "rect"> &
+      Partial<Pick<AnnotationCandidate, "comment">>)[],
+    kind?: "formula",
   ): Promise<void> {
     if (this.activeAnalyses.has(reader)) return;
     this.regionSelections.get(reader)?.();
@@ -351,6 +353,9 @@ export class FigureReaderController {
               signal: controller.signal,
               annotationReader: reader,
               syncAnnotations: false,
+              ...(kind === "formula"
+                ? { kind, comment: region.comment ?? "" }
+                : {}),
             },
           );
           summary.annotationsCreated += outcome.annotations.created;
@@ -806,7 +811,8 @@ export class FigureReaderController {
         onOpenGallery: () => this.openGallery?.(reader._item),
         onSelectRegion: () => this.startRegionSelection(reader),
         onCorrectCaption: (result) => this.startRegionSelection(reader, result),
-        onRecognizeRegion: (result) => this.runAnalysis(reader, [result]),
+        onRecognizeRegion: (result, kind) =>
+          this.runAnalysis(reader, [result], kind),
         onCancelAnalysis: () => this.cancelAnalysis(reader),
         onCacheTranslations: (contextKey, updates) =>
           this.resultStore.saveTranslations(reader._item, contextKey, updates),

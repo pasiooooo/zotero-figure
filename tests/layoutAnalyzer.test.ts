@@ -8,6 +8,8 @@ import type {
 import type { PdfReader } from "../src/platform/zotero/reader";
 import { AsyncPermitPool } from "../src/services/concurrency/asyncPermitPool";
 import { LayoutAnalyzer } from "../src/services/layout/layoutAnalyzer";
+import { FormulaLatexCoordinator } from "../src/services/formula/formulaLatexCoordinator";
+import { SILICONFLOW_FORMULA_API } from "../src/services/formula/formulaLatexService";
 import {
   DEFAULT_FIGURE_RESULT_ANALYSIS_IDENTITY,
   FigureResultStore,
@@ -341,7 +343,367 @@ test("caption recovery does not attach text from a different column", async () =
   }
 });
 
-test("image-only pages retain uncaptioned region results without a text-recovery pass", async () => {
+test("region context corrects a figure to a formula, excludes its number and enables LaTeX recognition", async () => {
+  const harness = installAnalyzerHarness({
+    detectionBatches: [
+      [detectionResults[0]],
+      [
+        { score: 0.9, type: "isolate_formula", xyxy: [0.25, 0.2, 0.6, 0.5] },
+        { score: 0.9, type: "formula_caption", xyxy: [0.75, 0.3, 0.8, 0.4] },
+        { score: 0.9, type: "isolate_formula", xyxy: [0.82, 0.7, 0.96, 0.8] },
+      ],
+    ],
+    pageData: { chars: [{ c: "(7)", rect: [76, 63, 78, 67] }] },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  const latex = new FormulaLatexCoordinator(store, {
+    getApiConfig: () => ({ ...SILICONFLOW_FORMULA_API, apiKey: "key" }),
+    isAutoRecognitionEnabled: () => true,
+    platform: {
+      getAttachment: async () => harness.reader._item,
+      listLibraries: () => [],
+      logError: (error) => assert.fail(error.message),
+    },
+    recognize: async (image) => {
+      assert.deepEqual([...image], [137, 80, 78, 71]);
+      return "x+y";
+    },
+  });
+  try {
+    const prior = await store.reconcilePage(
+      harness.reader._item,
+      0,
+      [
+        { pageIndex: 0, rect: [25, 50, 60, 80], tag: "Figure", comment: "" },
+        { pageIndex: 0, rect: [1, 1, 10, 10], tag: "Table", comment: "keep" },
+      ],
+      [Uint8Array.of(1).buffer, Uint8Array.of(2).buffer],
+      "replace-page",
+    );
+    const outcome = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [20, 40, 70, 90],
+    );
+    await latex.recognizeAttachment(harness.reader._item);
+    const results = await store.list(harness.reader._item);
+    assert.equal(results.length, 2);
+    const result = results.find(({ kind }) => kind === "formula")!;
+    assert.ok(
+      result,
+      "Full-page formula classification must reach the stored result",
+    );
+    assert.equal(result.tag, "Formula 7");
+    assert.equal(result.comment, "(7)");
+    assert.equal(result.latex, "x+y");
+    assert.deepEqual(result.rect, [25, 50, 60, 80]);
+    assert.deepEqual(harness.renderedRegionRects.at(-1), [[25, 50, 60, 80]]);
+    assert.deepEqual(
+      results.find(({ id }) => id === prior.results[1].id),
+      prior.results[1],
+    );
+    assert.equal(outcome.results.removed, 1);
+    assert.equal(harness.annotationWrites(), 0);
+  } finally {
+    latex.dispose();
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("ordinary selection stores a typeset inline expression as a formula even if the crop detector would return an image", async () => {
+  const rect: Rect = [20, 50, 62, 63];
+  const harness = installAnalyzerHarness({
+    detections: [detectionResults[0]],
+    pageData: {
+      chars: [
+        { c: "as ", rect: [9, 51, 18, 61] },
+        { c: "M", rect: [21, 51, 28, 61] },
+        { c: "0", rect: [28, 50, 32, 57] },
+        { c: "=", rect: [34, 51, 40, 61] },
+        { c: "V", rect: [44, 51, 50, 61] },
+        { c: "Δ", rect: [50, 51, 56, 61] },
+        { c: "τ", rect: [56, 51, 61, 61] },
+      ],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, rect);
+    const results = await store.list(harness.reader._item);
+    assert.deepEqual(
+      results.map(({ kind, rect }) => ({ kind, rect })),
+      [{ kind: "formula", rect }],
+    );
+    assert.deepEqual(harness.renderedRegionRects, [[rect]]);
+    assert.equal(AnalyzerWorker.instances.length, 0);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("display formula recognition reconciles the body and duplicate number crops with the full-page row", async () => {
+  const full: LayoutElement[] = [
+    {
+      score: 0.9,
+      type: "isolate_formula",
+      xyxy: [0.5532, 0.1547, 0.6703, 0.1709],
+    },
+    {
+      score: 0.9,
+      type: "formula_caption",
+      xyxy: [0.9291, 0.156, 0.9429, 0.1711],
+    },
+    {
+      score: 0.9,
+      type: "formula_caption",
+      xyxy: [0.9202, 0.1552, 0.9521, 0.1713],
+    },
+  ];
+  for (const [region, crop] of [
+    [
+      [330, 650, 574, 669],
+      [
+        { score: 0.9, type: "figure", xyxy: [0, 0.3396, 0.3107, 0.7004] },
+        { score: 0.9, type: "figure", xyxy: [0.9353, 0.3226, 0.9887, 0.7812] },
+        { score: 0.9, type: "figure", xyxy: [0.934, 0.09, 0.998, 0.76] },
+        { score: 0.9, type: "isolate_formula", xyxy: [0.93, 0.29, 0.99, 0.79] },
+      ],
+    ],
+    [[330, 650, 406, 669], []],
+    [
+      [330, 650, 406, 669],
+      [{ score: 0.9, type: "isolate_formula", xyxy: [0.05, 0.16, 0.95, 0.84] }],
+    ],
+    [[334, 652, 403, 665], []],
+  ] as [Rect, LayoutElement[]][]) {
+    const harness = installAnalyzerHarness({
+      detectionBatches: [crop, full],
+      pageData: {
+        viewBox: [0, 0, 601, 788],
+        pageBounds: [0, 0, 601, 788],
+        pageToPdf: [1, 0, 0, -1, 0, 788],
+        pdfToPage: [1, 0, 0, -1, 0, 788],
+        chars: [
+          {
+            c: "AIC = 2k − 2LLK",
+            rect: [335, 654, 402, 663],
+            lineBreakAfter: true,
+          },
+          { c: "(6)", rect: [559, 654, 570, 663], lineBreakAfter: true },
+        ],
+      },
+    });
+    const store = new FigureResultStore();
+    const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+    try {
+      if (region[2] > 550) {
+        await store.reconcilePage(
+          harness.reader._item,
+          0,
+          [
+            {
+              pageIndex: 0,
+              rect: [334, 652, 404, 665],
+              tag: "Figure",
+              comment: "",
+            },
+            {
+              pageIndex: 0,
+              rect: [553, 652, 573, 668],
+              tag: "Figure",
+              comment: "",
+            },
+          ],
+          [Uint8Array.of(1).buffer, Uint8Array.of(2).buffer],
+          "replace-page",
+        );
+      }
+      const outcome = await analyzer.analyzeRegion(
+        harness.reader._item,
+        0,
+        region,
+      );
+      if (region[2] > 550) assert.equal(outcome.results.removed, 2);
+      const results = await store.list(harness.reader._item);
+      assert.deepEqual(
+        results.map(({ tag, comment }) => [tag, comment]),
+        [["Formula 6", "(6)"]],
+      );
+      assert.ok(results[0].rect[2] < 410 && results[0].rect[0] >= region[0]);
+    } finally {
+      analyzer.dispose();
+      harness.restore();
+    }
+  }
+});
+
+test("explicit formula regions bypass the layout model and preserve the selected inline formula crop", async () => {
+  const harness = installAnalyzerHarness({
+    detections: [detectionResults[0]],
+    pageData: { chars: [] },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  const latex = new FormulaLatexCoordinator(store, {
+    getApiConfig: () => ({ ...SILICONFLOW_FORMULA_API, apiKey: "key" }),
+    isAutoRecognitionEnabled: () => true,
+    platform: {
+      getAttachment: async () => harness.reader._item,
+      listLibraries: () => [],
+      logError: (error) => assert.fail(error.message),
+    },
+    recognize: async () => "\\alpha+\\beta",
+  });
+  modelManager.ensureRecommendedModel = async () =>
+    assert.fail("An explicit formula crop must not need layout classification");
+  try {
+    const before = await store.reconcilePage(
+      harness.reader._item,
+      0,
+      [
+        { pageIndex: 0, rect: [25, 55, 55, 65], tag: "Figure", comment: "" },
+        { pageIndex: 0, rect: [1, 1, 10, 10], tag: "Table", comment: "keep" },
+      ],
+      [Uint8Array.of(1).buffer, Uint8Array.of(2).buffer],
+      "replace-page",
+    );
+    const outcome = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [20, 50, 60, 70],
+      { kind: "formula", comment: "Selected inline expression" },
+    );
+    await latex.recognizeAttachment(harness.reader._item);
+    const results = await store.list(harness.reader._item);
+    const formula = results.find(({ kind }) => kind === "formula")!;
+    assert.equal(results.length, 2);
+    assert.equal(formula.tag, "Formula");
+    assert.equal(formula.comment, "Selected inline expression");
+    assert.equal(formula.latex, "\\alpha+\\beta");
+    assert.deepEqual(formula.rect, [20, 50, 60, 70]);
+    assert.deepEqual(harness.renderedRegionRects, [[[20, 50, 60, 70]]]);
+    assert.deepEqual(harness.renderedPages, []);
+    assert.equal(AnalyzerWorker.instances.length, 0);
+    assert.equal(outcome.timings.inferenceMs, 0);
+    assert.equal(outcome.results.removed, 1);
+    assert.deepEqual(
+      results.find(({ id }) => id === before.results[1].id),
+      before.results[1],
+    );
+    assert.equal(harness.annotationWrites(), 0);
+  } finally {
+    latex.dispose();
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region recognition attaches a figure-classified equation number without saving a second image", async () => {
+  const harness = installAnalyzerHarness({
+    detections: [
+      { score: 0.9, type: "isolate_formula", xyxy: [0.1, 0.3, 0.7, 0.7] },
+      { score: 0.9, type: "figure", xyxy: [0.8, 0.4, 0.9, 0.6] },
+    ],
+    pageData: { chars: [{ c: "(12)", rect: [81, 53, 83, 57] }] },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, [10, 20, 90, 90]);
+    const [result, extra] = await store.list(harness.reader._item);
+    assert.equal(extra, undefined);
+    assert.equal(result.kind, "formula");
+    assert.equal(result.comment, "(12)");
+    assert.equal(result.tag, "Formula 12");
+    assert.deepEqual(result.rect, [18, 41, 66, 69]);
+    assert.deepEqual(harness.renderedRegionRects.at(-1), [[18, 41, 66, 69]]);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("image-only region recognition can recover an unnumbered formula from page context", async () => {
+  const harness = installAnalyzerHarness({
+    detectionBatches: [
+      [detectionResults[0]],
+      [{ score: 0.9, type: "isolate_formula", xyxy: [0.26, 0.2, 0.68, 0.5] }],
+    ],
+    pageData: { chars: [] },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyzeRegion(harness.reader._item, 0, [20, 40, 80, 90]);
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.kind, "formula");
+    assert.equal(result.tag, "Formula");
+    assert.deepEqual(result.rect, [26, 50, 68, 80]);
+    assert.deepEqual(harness.renderedPages, [0]);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("region context does not reclassify a figure using small embedded or out-of-region formulae", async () => {
+  for (const xyxy of [
+    [0.3, 0.25, 0.4, 0.3],
+    [0.19, 0.2, 0.68, 0.5],
+  ] as Rect[]) {
+    const harness = installAnalyzerHarness({
+      detectionBatches: [
+        [detectionResults[0]],
+        [{ score: 0.9, type: "isolate_formula", xyxy }],
+      ],
+    });
+    const store = new FigureResultStore();
+    const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+    try {
+      await analyzer.analyzeRegion(harness.reader._item, 0, [20, 40, 80, 90]);
+      const [result] = await store.list(harness.reader._item);
+      assert.equal(result.kind, "figure");
+      assert.deepEqual(result.rect, [26, 50, 68, 80]);
+    } finally {
+      analyzer.dispose();
+      harness.restore();
+    }
+  }
+});
+
+test("full-page formula recognition stores the body without its equation number", async () => {
+  const harness = installAnalyzerHarness({
+    detections: [
+      { score: 0.9, type: "isolate_formula", xyxy: [0.2, 0.4, 0.75, 0.5] },
+      { score: 0.9, type: "formula_caption", xyxy: [0.8, 0.42, 0.86, 0.48] },
+    ],
+    pageData: {
+      chars: [
+        { c: "E=mc²", rect: [21, 51, 70, 59] },
+        { c: "(2)", rect: [81, 53, 85, 57] },
+      ],
+    },
+  });
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  try {
+    await analyzer.analyze(harness.reader, { update() {} });
+    const [result] = await store.list(harness.reader._item);
+    assert.equal(result.kind, "formula");
+    assert.equal(result.tag, "Formula 2");
+    assert.deepEqual(result.rect, [20, 50, 75, 60]);
+    assert.deepEqual(harness.renderedRegionRects, [[[20, 50, 75, 60]]]);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("image-only pages retain uncaptioned figures after a type-context pass", async () => {
   const harness = installAnalyzerHarness({
     detections: [detectionResults[0]],
     pageData: { chars: [] },
@@ -354,7 +716,7 @@ test("image-only pages retain uncaptioned region results without a text-recovery
       [20, 40, 80, 90],
     );
     assert.equal(result.results.created, 1);
-    assert.deepEqual(harness.renderedPages, []);
+    assert.deepEqual(harness.renderedPages, [0]);
   } finally {
     analyzer.dispose();
     harness.restore();
@@ -415,6 +777,136 @@ test("region recognition validates bounds and releases leases after failure", as
   } finally {
     analyzer.dispose();
     harness.restore();
+  }
+});
+
+test("explicit formula regions validate bounds and release their document and attachment leases", async () => {
+  const harness = installAnalyzerHarness();
+  const store = new FigureResultStore();
+  const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+  const open = harness.pdfEngine.open;
+  let closed = 0;
+  harness.pdfEngine.open = async (...args) => {
+    const document = await open(...args);
+    return {
+      ...document,
+      close: async () => {
+        closed++;
+        await document.close();
+      },
+    };
+  };
+  modelManager.ensureRecommendedModel = async () =>
+    assert.fail("Explicit formula validation must not initialize a model");
+  try {
+    await assert.rejects(
+      analyzer.analyzeRegion(harness.reader._item, 0, [NaN, 0, 10, 10], {
+        kind: "formula",
+      }),
+      /Invalid recognition region/,
+    );
+    assert.equal(harness.openedDocumentCount(), 0);
+    await assert.rejects(
+      analyzer.analyzeRegion(harness.reader._item, 1, [0, 0, 10, 10], {
+        kind: "formula",
+      }),
+      /Invalid recognition page/,
+    );
+    await assert.rejects(
+      analyzer.analyzeRegion(harness.reader._item, 0, [110, 0, 120, 10], {
+        kind: "formula",
+      }),
+      /outside/,
+    );
+    const outcome = await analyzer.analyzeRegion(
+      harness.reader._item,
+      0,
+      [-10, -10, 110, 110],
+      { kind: "formula" },
+    );
+    assert.equal(outcome.results.created, 1);
+    assert.deepEqual(harness.renderedRegionRects, [[[0, 0, 100, 100]]]);
+    assert.deepEqual(
+      (await store.list(harness.reader._item))[0].rect,
+      [0, 0, 100, 100],
+    );
+    assert.equal(closed, 3);
+    assert.equal(AnalyzerWorker.instances.length, 0);
+  } finally {
+    analyzer.dispose();
+    harness.restore();
+  }
+});
+
+test("cancelled or failed explicit formula rendering preserves prior results and permits a retry", async () => {
+  for (const mode of ["cancelled", "failed"] as const) {
+    const harness = installAnalyzerHarness();
+    const store = new FigureResultStore();
+    const analyzer = new LayoutAnalyzer(store, harness.pdfEngine, 1);
+    const controller = new AbortController();
+    const open = harness.pdfEngine.open;
+    let renderOnce = true;
+    let closed = 0;
+    harness.pdfEngine.open = async (...args) => {
+      const document = await open(...args);
+      return {
+        ...document,
+        close: async () => {
+          closed++;
+          await document.close();
+        },
+        renderRegions: async (...renderArgs) => {
+          if (renderOnce) {
+            renderOnce = false;
+            if (mode === "failed") throw new Error("Formula preview failed");
+            controller.abort();
+          }
+          return document.renderRegions(...renderArgs);
+        },
+      };
+    };
+    modelManager.ensureRecommendedModel = async () =>
+      assert.fail("An explicit formula retry must not initialize a model");
+    try {
+      const before = await store.reconcilePage(
+        harness.reader._item,
+        0,
+        [
+          {
+            pageIndex: 0,
+            rect: [20, 50, 60, 70],
+            tag: "Figure",
+            comment: "Keep",
+          },
+        ],
+        [Uint8Array.of(1).buffer],
+        "replace-page",
+      );
+      await assert.rejects(
+        analyzer.analyzeRegion(harness.reader._item, 0, [20, 50, 60, 70], {
+          kind: "formula",
+          signal: controller.signal,
+        }),
+        mode === "failed" ? /Formula preview failed/ : OperationCancelledError,
+      );
+      assert.deepEqual(await store.list(harness.reader._item), before.results);
+      const outcome = await analyzer.analyzeRegion(
+        harness.reader._item,
+        0,
+        [20, 50, 60, 70],
+        { kind: "formula", comment: "Keep" },
+      );
+      assert.equal(outcome.results.removed, 1);
+      const [formula] = await store.list(harness.reader._item);
+      assert.equal(formula.kind, "formula");
+      assert.equal(formula.comment, "Keep");
+      assert.equal(closed, 2);
+      assert.equal(AnalyzerWorker.instances.length, 0);
+      assert.equal(harness.annotationWrites(), 0);
+    } finally {
+      analyzer.dispose();
+      harness.restore();
+    }
   }
 });
 

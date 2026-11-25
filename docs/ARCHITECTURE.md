@@ -150,7 +150,13 @@ same attachment concurrently; unrelated attachments still overlap.
    relevant classes, and applies non-maximum suppression.
 5. Map detector rectangles through the MuPDF page transform. Pure domain logic
    pairs figures/tables with captions, merges a nearby table footnote, associates
-   formula labels, and emits `AnnotationCandidate` values.
+   formula labels as metadata while cropping only formula bodies, and emits
+   `AnnotationCandidate` values. Same-row printed numbers can supply a full
+   label even when the detector clips a parenthesis or misses its box. Region
+   recognition reconciles the page body and number together so duplicate label
+   crops are discarded regardless of their predicted type. Inline selections
+   use mathematical glyphs and adjacent prose from MuPDF’s text layer before
+   layout inference.
 6. Ask the result store whether every candidate and PNG on the page is reusable.
    A reusable page skips high-resolution rendering and image writes.
 7. For an invalid cache, ask the store for page render candidates. Render each

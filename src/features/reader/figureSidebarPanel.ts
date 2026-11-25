@@ -81,7 +81,10 @@ export interface FigureSidebarPanelOptions {
   onOpenGallery(): void;
   onSelectRegion(): void;
   onCorrectCaption(result: StoredFigureResult): void;
-  onRecognizeRegion(result: StoredFigureResult): Promise<void>;
+  onRecognizeRegion(
+    result: StoredFigureResult,
+    kind?: "formula",
+  ): Promise<void>;
   onCancelAnalysis(): void;
   onCacheTranslations(
     contextKey: string,
@@ -2427,6 +2430,13 @@ export class FigureSidebarPanel {
           () => this.options.onRecognizeRegion(result),
           "refresh",
         );
+        if (result.kind !== "formula")
+          this.appendMenuItem(
+            editMenu,
+            "sidebar-recognize-as-formula",
+            () => this.options.onRecognizeRegion(result, "formula"),
+            "formula",
+          );
       }
       if (result.kind === "formula" && result.latex) {
         editMenu.append(

@@ -218,16 +218,24 @@ function getPageGeometry(page) {
 
 function extractCharacters(structuredText, pageToPdf) {
   const chars = [];
+  const mathFonts = new Map();
   let lineStart = 0;
   structuredText.walk({
     beginLine() {
       lineStart = chars.length;
     },
-    onChar(character, _origin, _font, _size, quad) {
+    onChar(character, _origin, font, _size, quad) {
       if (typeof character !== "string" || !character) return;
+      if (!mathFonts.has(font.pointer)) {
+        mathFonts.set(
+          font.pointer,
+          font.isItalic() || /math|cmmi|cmsy|cmex/i.test(font.getName()),
+        );
+      }
       chars.push({
         c: character,
         rect: transformQuadBounds(quad, pageToPdf),
+        ...(mathFonts.get(font.pointer) ? { mathStyle: true } : {}),
       });
     },
     endLine() {

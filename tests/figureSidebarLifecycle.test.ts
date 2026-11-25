@@ -8,7 +8,10 @@ import {
 } from "../src/features/reader/figureSidebarPanel";
 import type { ResultCorrectionPreview } from "../src/features/reader/resultRegionEditor";
 
-const testGlobals = globalThis as typeof globalThis & { addon: typeof addon };
+const testGlobals = globalThis as typeof globalThis & {
+  addon: typeof addon;
+  __pluginIconDataURL__?: string;
+};
 
 interface PanelInternals {
   openCommentEditor(result: StoredFigureResult): Promise<void>;
@@ -23,6 +26,69 @@ interface PanelInternals {
     result: StoredFigureResult,
   ): void;
 }
+
+test("one automatic selection action handles all regions and is disabled during analysis", () => {
+  const previousAddon = testGlobals.addon;
+  const previousPluginIcon = testGlobals.__pluginIconDataURL__;
+  testGlobals.addon = { data: {} } as typeof addon;
+  testGlobals.__pluginIconDataURL__ = "data:image/png;base64,";
+  class ActionNode {
+    children: ActionNode[] = [];
+    attributes = new Map<string, string>();
+    events = new Map<string, () => void>();
+    classList = { add() {} };
+    disabled = false;
+    append(...nodes: ActionNode[]) {
+      this.children.push(...nodes);
+    }
+    setAttribute(name: string, value: string) {
+      this.attributes.set(name, value);
+    }
+    addEventListener(name: string, listener: () => void) {
+      this.events.set(name, listener);
+    }
+  }
+  try {
+    let analyzing = false;
+    const kinds: Array<"formula" | undefined> = [];
+    const panel = createPanel(async () => createPreview(), {
+      isAnalyzing: () => analyzing,
+      onSelectRegion: (kind?: "formula") => kinds.push(kind),
+    });
+    const state = panel as unknown as {
+      pdfTranslateAvailable: boolean;
+      createActions(
+        document: Document,
+        results: StoredFigureResult[],
+      ): ActionNode;
+    };
+    state.pdfTranslateAvailable = false;
+    const document = {
+      createElement: () => new ActionNode(),
+      createElementNS: () => new ActionNode(),
+    } as unknown as Document;
+    const actions = state.createActions(document, []);
+    const findAction = (nodes: ActionNode, key: string) =>
+      nodes.children.find((node) =>
+        node.attributes.get("aria-label")?.endsWith(key),
+      );
+    assert.equal(findAction(actions, "sidebar-select-formula"), undefined);
+    findAction(actions, "sidebar-select-region")!.events.get("click")!();
+    assert.deepEqual(kinds, [undefined]);
+    analyzing = true;
+    assert.equal(
+      findAction(state.createActions(document, []), "sidebar-select-region")!
+        .disabled,
+      true,
+    );
+    panel.dispose();
+  } finally {
+    testGlobals.addon = previousAddon;
+    if (previousPluginIcon === undefined)
+      delete testGlobals.__pluginIconDataURL__;
+    else testGlobals.__pluginIconDataURL__ = previousPluginIcon;
+  }
+});
 
 test("continues panel cleanup when restoring the native sidebar throws", () => {
   const panel = createPanel(async () => createPreview());
@@ -1125,7 +1191,11 @@ test("sidebar menus group editing and selection, keep deletion last, and ignore 
   }
   const mounted: MenuNode[] = [];
   try {
+    const recognized: Array<{ id: string; kind?: "formula" }> = [];
     const state = selectionPanel({
+      onRecognizeRegion: async (result, kind?: "formula") => {
+        recognized.push({ id: result.id, kind });
+      },
       ownerWindow: {
         document: { createXULElement: (name: string) => new MenuNode(name) },
       } as unknown as Window,
@@ -1188,6 +1258,26 @@ test("sidebar menus group editing and selection, keep deletion last, and ignore 
     assert.ok(!multiLabels.includes("sidebar-save-image"));
     assert.ok(!multiLabels.includes("result-menu-edit"));
     assert.equal(multiLabels.at(-1), "gallery-delete-selected");
+    state.selectedResultIDs = new Set(["figure"]);
+    const figure = state.results[0];
+    state.openMenu(
+      {
+        closest: () => state.resultCards.get("figure"),
+      } as unknown as HTMLButtonElement,
+      figure,
+    );
+    const figureEdit = mounted[2].children.find(
+      (node) => label(node) === "result-menu-edit",
+    )!.children[0];
+    const recognizeFormula = figureEdit.children.find(
+      (node) => label(node) === "sidebar-recognize-as-formula",
+    )!;
+    assert.ok(
+      recognizeFormula,
+      "Misclassified images must be convertible from their menu",
+    );
+    recognizeFormula.events.get("command")!({ target: recognizeFormula });
+    assert.deepEqual(recognized, [{ id: "figure", kind: "formula" }]);
   } finally {
     testGlobals.addon = previousAddon;
   }

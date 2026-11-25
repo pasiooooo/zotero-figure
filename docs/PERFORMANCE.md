@@ -46,11 +46,13 @@ Saving acquires the existing single high-resolution region and MuPDF render
 permits, rerenders one PNG, and replaces the manifest only after the image
 write. It does not add another Worker or increase pipeline depth.
 
-Region recognition with a missing figure/table caption performs at most one
-additional 640 px full-page detection pass to recover caption context from
-the PDF text layer. It holds the same detection permit and acquires the same
-MuPDF render permit; only caption detections supplement the selected subjects.
-Pages without a text layer skip this extra pass.
+Region recognition reads the PDF text layer first. A tight inline mathematical
+expression in prose needs just one preview render and no layout inference.
+Other selections use crop detection and, for empty or ambiguous results, at
+most one additional 640 px page detection to recover missing bodies, captions
+and equation numbers. Both passes share the same detection and render permits.
+Image-only pages can still use the full-page layout for context. The optional
+image-to-formula correction also reuses the bounded preview and storage path.
 
 The second inference worker intentionally duplicates the 19,505,323-byte Q8
 model and its ONNX session. The two input tensors alone are about 9.4 MiB in

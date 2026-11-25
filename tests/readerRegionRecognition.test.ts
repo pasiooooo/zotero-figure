@@ -6,7 +6,7 @@ import type { StoredFigureResult } from "../src/services/results/figureResultSto
 import type { Rect } from "../src/domain/layout";
 import type { PdfReader } from "../src/platform/zotero/reader";
 
-type Region = { pageIndex: number; rect: Rect };
+type Region = { pageIndex: number; rect: Rect; comment?: string };
 interface MenuEntry {
   label: string;
   disabled?: boolean;
@@ -19,7 +19,11 @@ interface ControllerInternals {
     params: { ids: string[] };
     reader: PdfReader;
   }): void;
-  runAnalysis(reader: PdfReader, regions?: readonly Region[]): Promise<void>;
+  runAnalysis(
+    reader: PdfReader,
+    regions?: readonly Region[],
+    kind?: "formula",
+  ): Promise<void>;
   startRegionSelection(reader: PdfReader): void;
   createProgress(text: string): { startCloseTimer(delay: number): void };
 }
@@ -159,6 +163,64 @@ test("manual region recognition never enables annotation mirroring", async () =>
     await controller.runAnalysis(reader, regions);
     assert.deepEqual(revealed, [regions]);
     assert.deepEqual(options, [false]);
+  } finally {
+    globals.addon = previousAddon;
+    globalThis.Zotero = previousZotero;
+  }
+});
+
+test("explicit formula recognition forwards the selected kind and comment and still disables annotation mirroring", async () => {
+  const globals = globalThis as typeof globalThis & { addon: typeof addon };
+  const previousAddon = globals.addon;
+  const previousZotero = globalThis.Zotero;
+  globals.addon = { data: {} } as typeof addon;
+  globalThis.Zotero = {
+    logError: (error: Error) => assert.fail(error.message),
+  } as unknown as typeof Zotero;
+  try {
+    const options: unknown[] = [];
+    const recognized: unknown[] = [];
+    const item = {} as Zotero.Item;
+    const controller = new FigureReaderController(
+      { AbortController } as unknown as Window,
+      {
+        formulaLatex: {
+          subscribe: () => () => {},
+          recognizeAttachment: (attachment: unknown) =>
+            recognized.push(attachment),
+        },
+        galleryIndex: {},
+        resultStore: {},
+        layoutAnalyzer: {
+          analyzeRegion: async (
+            _item: unknown,
+            _page: number,
+            _rect: Rect,
+            option: object,
+          ) => {
+            options.push(option);
+            return {
+              annotations: { created: 0 },
+              results: { created: 1, removed: 1, skipped: 0 },
+            };
+          },
+        },
+      } as unknown as ConstructorParameters<typeof FigureReaderController>[1],
+    ) as unknown as ControllerInternals;
+    await controller.runAnalysis(
+      { _item: item } as PdfReader,
+      [{ pageIndex: 0, rect: [20, 50, 60, 70], comment: "Keep my note" }],
+      "formula",
+    );
+    const [option] = options as Array<{
+      kind: string;
+      comment: string;
+      syncAnnotations: boolean;
+    }>;
+    assert.equal(option.kind, "formula");
+    assert.equal(option.comment, "Keep my note");
+    assert.equal(option.syncAnnotations, false);
+    assert.deepEqual(recognized, [item]);
   } finally {
     globals.addon = previousAddon;
     globalThis.Zotero = previousZotero;
