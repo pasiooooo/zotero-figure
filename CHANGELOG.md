@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.6] - 2026-11-25
+
+### Added
+
+- 原有“框选区域识别”可自动识别正文中的行内公式，沿用现有 LaTeX 识别设置。已有图片可在右键“编辑”菜单中按公式重新识别。
+- Recognize inline expressions with the existing region tool and formula LaTeX settings. Existing image cards can also be reclassified from the Edit menu.
+
+### Fixed
+
+- 行间公式只裁本体，识别到的同一行编号写入公式备注和标签。只框公式也能找回框外编号；把编号一起框入时，不再单独生成编号图片。
+- Save only the body of a display equation and attach its same-row number to the formula comment and tag. The number can be outside the selection; including it no longer creates a separate image card.
+
 ## [1.1.5] - 2026-11-18
 
 - 修复 Library 独立窗口的右键菜单失效：从当前页面的宿主窗口创建原生菜单，挂载到该窗口的弹出层，不再使用后台 Zotero 主窗口或浏览器元素。
